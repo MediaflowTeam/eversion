@@ -1,0 +1,270 @@
+name: CI
+
+# CI runs on the long-lived branches that lead to a release, as described
+# in docs/release-branching.md.
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+      - dev
+      - "release/**"
+  workflow_dispatch:
+
+# Every job's GITHUB_TOKEN can only read the repository, whatever the
+# repository or organization default is. A job that needs more should
+# declare it in its own permissions block instead of widening this one.
+permissions:
+  contents: read
+
+# A new run for the same branch or pull request cancels the older one,
+# also on main and release branches.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Tool versions follow docs/tool-versions.md: scripts/tool-requirements.txt
+# lists the PyPI tools, and every job checks them with tool_versions.py
+# --strict. Runner labels are pinned, so that a new runner image does not
+# change compilers or preinstalled tools unnoticed.
+#
+# Every job runs in the debian:13-slim image on an ubuntu-24.04 runner.
+# scripts/install_linux_tools.sh installs the same tools on any Debian or
+# Ubuntu image, so the setup can be reproduced locally with Docker. The image
+# has no git; each job installs it before the checkout, so that the checkout is
+# a git work tree.
+#
+# Actions are pinned to a full commit SHA, with the release in a trailing
+# comment, so that moving a tag cannot change what runs. To update an
+# action, look up the commit of the new release tag and change both.
+# Checkout does not keep the token in the git configuration: no step after
+# it uses git over the network.
+
+jobs:
+  contracts:
+    name: Contract tests (debian-13)
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict
+
+      - name: Run contract tests
+        run: |
+          for test in scripts/*_test.py; do
+            python3 "$test"
+          done
+
+  # The clang row builds with the recommended LLVM release, the same one as
+  # clang-format and clang-tidy. install_linux_tools.sh --clang installs it
+  # from Debian 13 backports and links clang++ in the tools directory;
+  # tool_versions.py --tool clang++ checks its version.
+  quality-linux:
+    name: Quality (debian-13, ${{ matrix.compiler }}, shared=${{ matrix.shared }})
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+        shared:
+          - OFF
+          - ON
+        include:
+          - compiler: gcc
+            cxx: g++
+          - compiler: clang
+            cxx: clang++
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh ${{ matrix.compiler == 'clang' && '--clang' || '' }} "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict ${{ matrix.compiler == 'clang' && '--tool clang++' || '' }}
+
+      - name: Run quality gate
+        env:
+          QUALITY_CMAKE_ARGS: -G Ninja -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+        run: python3 scripts/quality.py check
+
+  sanitizers:
+    name: Sanitizers (debian-13)
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict
+
+      - name: Configure
+        run: cmake --preset asan-ubsan -G Ninja
+
+      - name: Build
+        run: cmake --build --preset asan-ubsan
+
+      - name: Test
+        run: ctest --preset asan-ubsan
+
+  thread-sanitizer:
+    name: ThreadSanitizer (debian-13)
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:13-slim
+      # Docker's default seccomp profile does not let setarch disable address
+      # space randomization.
+      options: --security-opt seccomp=unconfined
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict
+
+      - name: Configure
+        run: cmake --preset tsan -G Ninja
+
+      # ThreadSanitizer aborts when the kernel's mmap randomization breaks its
+      # memory layout, as on the runner. setarch -R turns randomization off for
+      # the build, which runs the test executable to list its tests, and for
+      # the tests.
+      - name: Build
+        run: setarch "$(uname -m)" -R cmake --build --preset tsan
+
+      - name: Test
+        run: setarch "$(uname -m)" -R ctest --preset tsan
+
+  coverage:
+    name: Coverage (debian-13)
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh --gcovr "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict
+
+      # Coverage is advisory: the job fails only when the build or a test
+      # fails, never because of the percentage.
+      - name: Generate coverage report
+        env:
+          QUALITY_CMAKE_ARGS: -G Ninja
+        run: python3 scripts/coverage.py
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-report
+          path: build/coverage-report/
+          if-no-files-found: error
+
+  docs:
+    name: Docs (debian-13)
+    runs-on: ubuntu-24.04
+    container: debian:13-slim
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Debian 13 provides Doxygen 1.9.8, which does not report undocumented
+      # namespaces; --doxygen installs the recommended release instead.
+      - name: Install tools
+        run: |
+          sh scripts/install_linux_tools.sh --doxygen "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify tool versions
+        run: python scripts/tool_versions.py --strict
+
+      - name: Run docs contract test
+        run: python3 scripts/docs_contract_test.py
+
+      - name: Configure
+        run: cmake --preset docs -G Ninja
+
+      - name: Generate documentation
+        run: cmake --build --preset docs
