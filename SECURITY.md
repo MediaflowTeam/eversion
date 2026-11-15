@@ -1,11 +1,5 @@
 # Security Policy
 
-<!--
-Template: projects created from cpp-library-template should list the versions they support
-and enable private vulnerability reporting in the repository settings
-(Settings > Code security > Private vulnerability reporting).
--->
-
 ## Supported Versions
 
 Security fixes are made for the latest published release. An older minor

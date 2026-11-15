@@ -6,136 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!--
-Template: the entries below record changes to the cpp-library-template template itself.
-Projects created from the template should replace them with their own history,
-starting from an empty Unreleased section.
--->
-
 ## [Unreleased]
 
-## [0.2.0] - 2026-11-14
+EVersion moved from the `Raricor/EVersion` repository to this repository, which
+was created from cpp-library-template v0.2.0 (see `TEMPLATE_VERSION`). EVersion
+had no release before the move. The entries below compare this repository with
+the last state of the earlier one.
 
 ### Changed
 
-- The CI Clang build uses clang 21, the same LLVM release as clang-format and
-  clang-tidy, instead of Debian 13's clang 19. `install_linux_tools.sh --clang`
-  installs `clang-N`, where N is the LLVM major version in
-  `tool-requirements.txt`, adds Debian's backports source when the Debian
-  release does not have that package, and links `clang` and `clang++` to it in
-  the tools directory. On Ubuntu 24.04, `--clang` stops with an error, because
-  the release has no clang 21. The CI Clang rows check the compiler version
-  with `tool_versions.py --tool clang++`, and `docs/tool-versions.md` lists
-  clang 21.1 as the recommended version for Clang builds.
-- `docs/tool-versions.md` recommends GCC 14.2, the version CI uses, and notes
-  that the ABI of C++20 library features is stable only from GCC 16.
-
-## [0.1.0] - 2026-11-12
-
-The first versioned release of the template. The entries describe the changes
-since the template had no version.
+- The CMake package is named `eversion` instead of `EVersion`. Consumers use
+  `find_package(eversion CONFIG REQUIRED)`, and the package files are installed
+  to `<libdir>/cmake/eversion/`. The `eversion::eversion` target, the
+  `eversion_declare()` and `eversion_declare_plugin()` functions, their
+  arguments and target properties, and the generated code are unchanged.
+- The build options follow the package name: `EVERSION_BUILD_TESTS`,
+  `EVERSION_INSTALL`, `EVERSION_ENABLE_SANITIZERS`, and
+  `EVERSION_WARNINGS_AS_ERRORS` are now `eversion_BUILD_TESTS`,
+  `eversion_INSTALL`, `eversion_ENABLE_SANITIZERS`, and
+  `eversion_WARNINGS_AS_ERRORS`.
+- The package version file uses `SameMinorVersion` instead of
+  `SameMajorVersion`, so `find_package(eversion 0.1)` no longer accepts 0.2 or
+  later. It is also `ARCH_INDEPENDENT`.
+- CMake 4.2 or newer is required, instead of 3.21.
+- EVersion supports Linux only, with GCC or Clang. Configuring with MSVC or
+  clang-cl stops with an error, and `eversion_declare_plugin()` always exports
+  the plugin entry point with `__attribute__((visibility("default")))`.
+- The tests moved from `tests/` to `test/`.
+- The `asan-ubsan` preset compiles with `-fno-sanitize-recover=all`, so an
+  UndefinedBehaviorSanitizer report fails the test.
 
 ### Added
 
-- `TEMPLATE_VERSION` file that records which template version a project is
-  based on.
-- `.gitattributes` and `.editorconfig` with an LF line ending policy.
-- `tsan` preset and `mylib_ENABLE_THREAD_SANITIZER` option for
-  ThreadSanitizer, with a CI job.
-- Optional pre-commit hook that checks formatting.
-- Contributing guide, security policy, changelog, and issue and pull request
+- `examples/version_report`, a plugin host built only against the installed
+  package and run by `quality.py check`.
+- The `tsan`, `coverage`, and `docs` presets, with the
+  `eversion_ENABLE_THREAD_SANITIZER`, `eversion_ENABLE_COVERAGE`, and
+  `eversion_BUILD_DOCS` options, and `scripts/coverage.py`.
+- API documentation with Doxygen; the `eversion::detail` namespace is left out
+  of it.
+- Contract tests under `scripts/` for the CMake, CI, packaging, and
+  documentation conventions; CI runs them.
+- `.editorconfig`, `.gitattributes`, an optional pre-commit hook,
+  `CONTRIBUTING.md`, `SECURITY.md`, this changelog, and issue and pull request
   templates.
-- Contract tests in `scripts/` for template conventions, run by the
-  `Contract tests` CI job.
-- Warning options for the `universe_answer` example, with a
-  `universe_answer_WARNINGS_AS_ERRORS` option.
-- `docs` preset and `mylib_BUILD_DOCS` option that generate API
-  documentation with Doxygen, with a CI job that fails on undocumented public
-  API.
-- Recommended tool versions in `docs/tool-versions.md`: clang-format and
-  clang-tidy 21.1, CMake 4.2, and Doxygen 1.15. They are recommendations, not
-  requirements. `scripts/tool_versions.py` compares the installed tools with
-  them.
-- `scripts/install_linux_tools.sh`, which sets up a Debian or Ubuntu image for
-  the quality gate.
-- `docs/license.md`, which explains why the template recommends GPL-3.0, what
-  it means for users of a library, and how to replace it.
-- Optional coverage reports: the `coverage` preset and
-  `mylib_ENABLE_COVERAGE` option build with `--coverage` on GCC and
-  Clang, and `scripts/coverage.py` writes a gcovr report of `src/` and
-  `include/`. A CI job uploads the report as an artifact. Coverage is
-  advisory: it has no threshold and is not part of `quality.py check`.
-- A Clang build in the CI quality job, next to GCC 14. It uses Debian's
-  clang 19, which `scripts/install_linux_tools.sh --clang` installs.
-
-### Changed
-
-- CMake 4.2 or newer is required, the same version that is recommended. The
-  CMake files declared 3.21, but the build already needed 3.26 for
-  `cmake -E copy -t`.
-- C++20 module scanning is turned off. With CMake 4.2 policies it is on by
-  default, and with GCC it adds flags that `clang-tidy` cannot read.
-- GPL-3.0 is described as a recommendation, not a requirement: libraries
-  created from the template may replace the license.
-- `quality.py package` installs and tests the configuration built by the
-  quality presets, and configures the package example with the same CMake
-  arguments as the library.
-- `quality.py tidy` and `quality.py check` stop with an explanation when the
-  CMake generator does not write `compile_commands.json`; `test` and `package`
-  print a warning instead.
-- `quality.py check` runs `clang-tidy` on the example as well, and the package
-  consumer check builds the example with warnings as errors.
-- `mylib_WARNINGS_AS_ERRORS` also turns Doxygen warnings into errors.
-- CI installs the recommended tool versions and fails when a job runs other
-  versions. CI jobs run in a `debian:13-slim` container, and runner labels
-  are pinned instead of `-latest`.
-- The ThreadSanitizer CI job disables address space randomization with
-  `setarch` instead of changing the kernel setting.
-- CI jobs get a read-only `GITHUB_TOKEN`, and checkout does not keep the token
-  for the steps after it. A new CI run for the same branch or pull request
-  cancels the older one.
-- CI also runs when `dev` is updated and for pull requests targeting `dev`,
-  so that a change that breaks the build is found before a release is
-  prepared.
-- CI actions are pinned to commit SHAs and use releases that run on
-  Node.js 24, such as `actions/checkout` 7.0.1.
-- The placeholder project name is no longer `project_name`, whose uppercase
-  form is CMake's `PROJECT_NAME` variable. The new placeholder is unique in
-  lowercase and in uppercase, so `scripts/rename_project.py` replaces both
-  forms in file contents and in file and directory names, instead of only the
-  lowercase name and two uppercase macros.
-- The template is named `cpp-library-template` instead of `CPP-DEV`, and the
-  environment variable for extra CMake arguments to `quality.py` and
-  `coverage.py` is `QUALITY_CMAKE_ARGS` instead of
-  `CPP_DEV_CMAKE_CONFIGURE_ARGS`. The variable has the same name in every
-  project created from the template.
-- `rename_project.py` leaves itself unchanged, so that it keeps the template
-  placeholder as its default, and skips the same directories as `quality.py`,
-  now including `.venv`, `venv`, and `node_modules`.
-- The shared library's SONAME carries the project's major and minor version,
-  such as `libmylib.so.0.1`, and the package version file uses
-  `SameMinorVersion` instead of `SameMajorVersion`. Only patch releases promise
-  a compatible ABI, before and after 1.0.
-
-### Removed
-
-- Windows and macOS support. The template supports Linux only, with GCC or
-  Clang: the CMake configure functions stop with an error for MSVC, clang-cl,
-  and other compilers, and CI no longer runs on Windows and macOS. `7c263d3`
-  is the last commit with Windows and macOS support, for projects that need
-  to bring it back.
 
 ### Fixed
 
-- `clang-tidy` reports problems in private headers under `src/`. The header
-  filter only matched source files there.
-- `quality.py tidy` no longer reports false errors in test headers that use
-  definitions or include paths of the test target. Header smoke translation
-  units are generated only for public headers under `include/`; private and
-  test headers are checked through the sources that include them.
-- UndefinedBehaviorSanitizer findings now fail the test run.
-- `quality.py` reports a tool missing from `PATH` with one error line and
-  exit status 1 instead of a Python traceback.
-- `CMakeUserPresets.json` is ignored by git.
-- `rename_project.py` no longer stops with an error at a dangling symbolic
-  link, and no longer follows symbolic links.
+- The plugin metadata test looks up `eversion::kPluginInfoSymbol` through a
+  null-terminated copy, because a `std::string_view` does not guarantee a
+  terminating null character. The README example does the same.
+- The CMake script tests configure their sub-projects with the generator, the
+  make program, and the C++ compiler of the enclosing build, and check that the
+  sub-projects use them. Before, the sub-projects used CMake's defaults: a build
+  machine without `make` failed the tests, and a Clang build compiled the
+  sub-projects with the default compiler.
+
+### Removed
+
+- Windows and macOS CI jobs, and the Windows code paths in the CMake functions
+  and tests.

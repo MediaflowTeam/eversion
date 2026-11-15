@@ -1,4 +1,3 @@
-# Template: projects created from cpp-library-template can adjust the labels and fields.
 name: Bug report
 description: Report a problem with the library, its build, or its CMake package.
 labels:

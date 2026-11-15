@@ -1,11 +1,6 @@
 # Contributing
 
-<!--
-Template: projects created from cpp-library-template should review this guide and adjust
-the branch flow, required checks, and commit conventions to match the project.
--->
-
-Thank you for helping improve this project. This guide covers the checks to run
+Thank you for helping improve EVersion. This guide covers the checks to run
 before submitting a change and how branches, commits, and pull requests are
 organized.
 
