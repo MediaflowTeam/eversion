@@ -22,7 +22,7 @@ HEADER_FILTER_LINE_RE = re.compile(
     r'^[ \t]*HeaderFilterRegex[ \t]*:[ \t]*"((?:[^"\\]|\\.)*)"[ \t]*$',
     re.MULTILINE,
 )
-DIRECTORIES = ("include/mylib", "src", "src/detail", "test", "tests")
+DIRECTORIES = ("include/eversion", "src", "src/detail", "test", "tests")
 ABSOLUTE_PREFIX = "/home/user/repo/"
 
 
