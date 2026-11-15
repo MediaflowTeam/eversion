@@ -1,0 +1,145 @@
+/**
+ * @file version_test.cc
+ * @brief Tests the EVersion value type and precedence comparison.
+ * @author EVersion contributors
+ * @date 2026-06-05
+ */
+
+#include <eversion/runtime_version.h>
+#include <gtest/gtest.h>
+
+#include <compare>
+#include <cstdint>
+#include <limits>
+#include <string_view>
+#include <type_traits>
+
+namespace {
+
+constexpr eversion::Version V(std::uint32_t major, std::uint32_t minor,
+                              std::uint32_t patch,
+                              std::string_view prerelease = {},
+                              std::string_view build_metadata = {}) {
+  return eversion::Version{.major = major,
+                           .minor = minor,
+                           .patch = patch,
+                           .prerelease = prerelease,
+                           .build_metadata = build_metadata};
+}
+
+TEST(Version, EqualityIgnoresBuildMetadata) {
+  EXPECT_EQ(V(1, 2, 3), V(1, 2, 3));
+  EXPECT_NE(V(1, 2, 3), V(1, 2, 4));
+  EXPECT_EQ(V(1, 2, 3, {}, "git.aaa"), V(1, 2, 3, {}, "git.bbb"));
+}
+
+TEST(Version, SpaceshipUsesWeakOrderingForMetadataEquivalence) {
+  static_assert(
+      std::is_same_v<decltype(V(1, 2, 3) <=> V(1, 2, 3)), std::weak_ordering>);
+
+  EXPECT_EQ(V(1, 2, 3, {}, "git.aaa") <=> V(1, 2, 3, {}, "git.bbb"),
+            std::weak_ordering::equivalent);
+  EXPECT_EQ(V(1, 2, 3, {}, "git.aaa").ToString(), "1.2.3+git.aaa");
+  EXPECT_EQ(V(1, 2, 3, {}, "git.bbb").ToString(), "1.2.3+git.bbb");
+}
+
+TEST(Version, PrecedenceOrdering) {
+  EXPECT_LT(V(1, 0, 0, "alpha"), V(1, 0, 0));
+  EXPECT_LT(V(1, 0, 0, "alpha"), V(1, 0, 0, "alpha.1"));
+  EXPECT_LT(V(1, 0, 0, "alpha.1"), V(1, 0, 0, "alpha.beta"));
+  EXPECT_LT(V(1, 0, 0, "beta.2"), V(1, 0, 0, "beta.11"));
+}
+
+TEST(Version, Stability) {
+  EXPECT_FALSE(V(0, 9, 0).IsStable());
+  EXPECT_FALSE(V(1, 0, 0, "rc.1").IsStable());
+  EXPECT_TRUE(V(1, 0, 0).IsStable());
+}
+
+TEST(Version, ToStringIncludesPrereleaseAndBuildMetadata) {
+  EXPECT_EQ(V(1, 2, 3, "rc.1", "git.deadbeef").ToString(),
+            "1.2.3-rc.1+git.deadbeef");
+}
+
+TEST(Version, RuntimeVersionOwnsStringsAndExposesVersionView) {
+  eversion::RuntimeVersion owned{
+      .major = 1,
+      .minor = 2,
+      .patch = 3,
+      .prerelease = "rc.1",
+      .build_metadata = "git.deadbeef",
+  };
+
+  const eversion::Version view = owned.AsVersion();
+  EXPECT_EQ(view.prerelease.data(), owned.prerelease.data());
+  EXPECT_EQ(view.build_metadata.data(), owned.build_metadata.data());
+  EXPECT_TRUE(owned.HasPrerelease());
+  EXPECT_TRUE(owned.HasBuildMetadata());
+  EXPECT_FALSE(owned.IsStable());
+  EXPECT_EQ(owned.ToString(), "1.2.3-rc.1+git.deadbeef");
+}
+
+TEST(Version, TryParseVersionAcceptsSupportedForms) {
+  const eversion::RuntimeVersion full_version =
+      eversion::TryParseVersion("1.2.3-rc.001+git-deadbeef")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(full_version.major, 1U);
+  EXPECT_EQ(full_version.minor, 2U);
+  EXPECT_EQ(full_version.patch, 3U);
+  EXPECT_EQ(full_version.prerelease, "rc.001");
+  EXPECT_EQ(full_version.build_metadata, "git-deadbeef");
+  EXPECT_EQ(full_version.ToString(), "1.2.3-rc.001+git-deadbeef");
+
+  const eversion::RuntimeVersion stable_version =
+      eversion::TryParseVersion("4294967295.0.7")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(stable_version.major, std::numeric_limits<std::uint32_t>::max());
+  EXPECT_EQ(stable_version.minor, 0U);
+  EXPECT_EQ(stable_version.patch, 7U);
+  EXPECT_TRUE(stable_version.IsStable());
+
+  const eversion::RuntimeVersion build_only_version =
+      eversion::TryParseVersion("1.2.3+build.42")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(build_only_version.prerelease, "");
+  EXPECT_EQ(build_only_version.build_metadata, "build.42");
+
+  const eversion::RuntimeVersion hyphenated_metadata_version =
+      eversion::TryParseVersion("1.2.3-alpha-1+build-42")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(hyphenated_metadata_version.prerelease, "alpha-1");
+  EXPECT_EQ(hyphenated_metadata_version.build_metadata, "build-42");
+}
+
+TEST(Version, TryParseVersionRejectsInvalidForms) {
+  EXPECT_FALSE(eversion::TryParseVersion("").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3.4").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3-").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3+").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3-rc..1").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3-.alpha").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3-alpha.").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3+build..1").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3+.build").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3+build.").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3-rc_1").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("1.2.3+a+b").has_value());
+  EXPECT_FALSE(eversion::TryParseVersion("4294967296.0.0").has_value());
+}
+
+TEST(Version, PrereleaseNumericBoundaries) {
+  EXPECT_EQ(V(1, 0, 0, "007"), V(1, 0, 0, "7"));
+  EXPECT_LT(V(1, 0, 0, "9"), V(1, 0, 0, "123456789012345678901234567890"));
+  EXPECT_LT(V(1, 0, 0, "1"), V(1, 0, 0, "alpha"));
+  EXPECT_LT(V(1, 0, 0, "1"), V(1, 0, 0));
+}
+
+static_assert(V(1, 2, 3) == V(1, 2, 3));
+static_assert(V(1, 0, 0, "alpha") < V(1, 0, 0));
+static_assert(V(1, 2, 3, {}, "x") == V(1, 2, 3, {}, "y"));
+static_assert((V(1, 2, 3, {}, "x") <=> V(1, 2, 3, {}, "y")) ==
+              std::weak_ordering::equivalent);
+static_assert(V(1, 0, 0).IsStable());
+
+}  // namespace
