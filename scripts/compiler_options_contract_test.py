@@ -11,13 +11,13 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-OPTIONS_MODULE = ROOT_DIR / "cmake" / "mylibOptions.cmake"
-COMPILER_MODULE = ROOT_DIR / "cmake" / "mylibCompiler.cmake"
+OPTIONS_MODULE = ROOT_DIR / "cmake" / "eversionOptions.cmake"
+COMPILER_MODULE = ROOT_DIR / "cmake" / "eversionCompiler.cmake"
 CI_WORKFLOW = ROOT_DIR / ".github" / "workflows" / "ci.yml"
-EXAMPLE_LISTS = ROOT_DIR / "examples" / "universe_answer" / "CMakeLists.txt"
+EXAMPLE_LISTS = ROOT_DIR / "examples" / "version_report" / "CMakeLists.txt"
 CONFIGURE_FUNCTIONS = (
-    "mylib_configure_cxx_target",
-    "mylib_configure_cxx_interface_target",
+    "eversion_configure_cxx_target",
+    "eversion_configure_cxx_interface_target",
 )
 BUILD_INTERFACE_RE = re.compile(r"^\$<BUILD_INTERFACE:(.*)>$")
 
@@ -85,7 +85,8 @@ endfunction()
 
 # Other commands that the example calls; the probe does not check them.
 foreach(command IN ITEMS
-    project find_package add_executable target_link_libraries
+    project find_package add_executable add_library target_link_libraries
+    eversion_declare eversion_declare_plugin
     add_custom_command enable_testing add_test set_tests_properties)
   cmake_language(EVAL CODE "function(${command})\nendfunction()")
 endforeach()
@@ -94,7 +95,7 @@ file(WRITE "${PROBE_OUTPUT}" "")
 if(DEFINED PROBE_EXAMPLE_LISTS)
   include("${PROBE_EXAMPLE_LISTS}")
 else()
-  set(PROJECT_NAME mylib)
+  set(PROJECT_NAME eversion)
   set(PROJECT_IS_TOP_LEVEL ON)
   include("${OPTIONS_MODULE}")
   include("${COMPILER_MODULE}")
@@ -109,13 +110,20 @@ class ProbeResult:
         # CMake wraps messages at about 80 columns; join the lines again.
         self.stderr = " ".join(stderr.split())
         self.compile_options: list[str] = []
+        self.compile_options_by_target: dict[str, list[str]] = {}
         self.link_options: list[str] = []
         for line in output.splitlines():
             command, _, args = line.partition(" ")
-            # Drop the target name and the PRIVATE or INTERFACE keyword.
-            values = [unwrap_build_interface(arg) for arg in args.split()[2:]]
+            target, _, remainder = args.partition(" ")
+            # Drop the PRIVATE or INTERFACE keyword.
+            values = [
+                unwrap_build_interface(arg) for arg in remainder.split()[1:]
+            ]
             if command == "target_compile_options":
                 self.compile_options.extend(values)
+                self.compile_options_by_target.setdefault(target, []).extend(
+                    values
+                )
             elif command == "target_link_options":
                 self.link_options.extend(values)
 
@@ -145,9 +153,9 @@ class CompilerOptionsContractTest(unittest.TestCase):
                 "PROBE_FUNCTION": function,
                 "OPTIONS_MODULE": OPTIONS_MODULE.as_posix(),
                 "COMPILER_MODULE": COMPILER_MODULE.as_posix(),
-                "mylib_WARNINGS_AS_ERRORS": "ON",
+                "eversion_WARNINGS_AS_ERRORS": "ON",
                 **compiler,
-                **{f"mylib_{name}": value for name, value in options.items()},
+                **{f"eversion_{name}": value for name, value in options.items()},
             }
         )
 
@@ -157,7 +165,7 @@ class CompilerOptionsContractTest(unittest.TestCase):
         return self.run_probe(
             {
                 "PROBE_EXAMPLE_LISTS": EXAMPLE_LISTS.as_posix(),
-                "universe_answer_WARNINGS_AS_ERRORS": warnings_as_errors,
+                "version_report_WARNINGS_AS_ERRORS": warnings_as_errors,
                 **compiler,
             }
         )
@@ -252,7 +260,13 @@ class CompilerOptionsContractTest(unittest.TestCase):
 
                     self.assertEqual(example.returncode, 0, example.stderr)
                     self.assertTrue(example.compile_options)
-                    self.assertEqual(example.compile_options, library.compile_options)
+                    self.assertEqual(
+                        example.compile_options_by_target,
+                        {
+                            "version_report_cli": library.compile_options,
+                            "version_report_plugin": library.compile_options,
+                        },
+                    )
 
     def test_coverage_applies_to_gnu_style_compilers(self) -> None:
         for compiler_name, compiler in GNU_STYLE_COMPILERS.items():

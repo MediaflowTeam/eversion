@@ -25,7 +25,7 @@ VERSIONS_DOC = ROOT_DIR / "docs" / "tool-versions.md"
 PRESETS = ROOT_DIR / "CMakePresets.json"
 REQUIRED_CMAKELISTS = (
     ROOT_DIR / "CMakeLists.txt",
-    ROOT_DIR / "examples" / "universe_answer" / "CMakeLists.txt",
+    ROOT_DIR / "examples" / "version_report" / "CMakeLists.txt",
 )
 # Match every call and capture its full argument text, so that unsupported
 # arguments such as FATAL_ERROR are reported instead of being skipped.

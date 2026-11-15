@@ -187,7 +187,7 @@ the `tsan` preset locally.
    gcovr, `gcovr_version` in the same script. For
    CMake, the recommendation is also the minimum version: update
    `cmake_minimum_required` in `CMakeLists.txt` and
-   `examples/universe_answer/CMakeLists.txt`, `cmakeMinimumRequired` in
+   `examples/version_report/CMakeLists.txt`, `cmakeMinimumRequired` in
    `CMakePresets.json`, and the CMake Contract in `README.md`.
    `scripts/cmake_minimum_contract_test.py` checks that they agree.
 2. Run `python3 scripts/quality.py check` with the new versions and fix new

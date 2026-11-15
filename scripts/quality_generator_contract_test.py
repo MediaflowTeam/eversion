@@ -50,7 +50,7 @@ class QualityGeneratorContractTest(unittest.TestCase):
             mock.patch.object(
                 quality,
                 "PACKAGE_EXAMPLE_BUILD_DIR",
-                package_dir / "universe_answer",
+                package_dir / "version_report",
             ),
             mock.patch.object(quality, "run", self.commands.append),
             mock.patch.dict(os.environ, {quality.CMAKE_CONFIGURE_ARGS_ENV: ""}),
