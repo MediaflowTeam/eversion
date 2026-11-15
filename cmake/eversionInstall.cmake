@@ -1,13 +1,10 @@
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-function(mylib_install_package target)
+function(eversion_install_package target)
   install(
     TARGETS ${target}
     EXPORT ${PROJECT_NAME}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   )
 
@@ -17,8 +14,13 @@ function(mylib_install_package target)
   )
 
   install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/include/${PROJECT_NAME}/export.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+    FILES cmake/${PROJECT_NAME}Declare.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+  )
+
+  install(
+    DIRECTORY templates/
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}/templates
   )
 
   install(
@@ -34,11 +36,13 @@ function(mylib_install_package target)
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
   )
 
-  # Match the library SOVERSION: only patch releases are ABI compatible.
+  # Only patch releases are ABI compatible. The library is header-only, so the
+  # package is also architecture-independent.
   write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMinorVersion
+    ARCH_INDEPENDENT
   )
 
   install(

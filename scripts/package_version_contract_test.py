@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-"""Check the shared-library SOVERSION and package version contract.
+"""Check the header-only package version and install contract.
 
-The installed shared library and the installed package version file must use
-the same rule: only patch releases are ABI compatible, before and after 1.0.
-These checks run on Linux because they inspect SONAMEs and `.so` symlinks.
+The package version file must accept only patch releases within the same
+major.minor series, before and after 1.0, and it must be architecture
+independent.  The install tree must provide the generated header, the package
+declaration helper and its templates, but no library files.  These checks run
+on Linux because they inspect the installed tree.
 """
 
 from __future__ import annotations
@@ -18,13 +20,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import rename_project
+from quality import SKIPPED_DIRECTORY_NAMES
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CMAKE_LISTS = ROOT_DIR / "CMakeLists.txt"
 README = ROOT_DIR / "README.md"
 FUTURE_VERSION = (1, 2, 3)
+LIBRARY_GLOB_PATTERNS = ("lib*.so*", "lib*.a")
 
 PROJECT_RE = re.compile(
     r"\bproject\s*\(\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+VERSION\s+"
@@ -39,10 +42,6 @@ INSTALL_CONTRACT_RE = re.compile(
 
 def format_version(version: tuple[int, int, int]) -> str:
     return ".".join(str(part) for part in version)
-
-
-def format_series(version: tuple[int, int, int]) -> str:
-    return f"{version[0]}.{version[1]}"
 
 
 def read_project(cmake_lists: Path) -> tuple[str, tuple[int, int, int]]:
@@ -76,13 +75,15 @@ def set_project_version(
 
 
 def ignore_when_copying(directory: str, names: list[str]) -> set[str]:
-    # Skip what the rename skips, and local symlinks such as `review`, whose
+    # Skip generated directories and local symlinks such as `review`, whose
     # targets lie outside the repository.
+    current = Path(directory)
     return {
         name
         for name in names
-        if rename_project.should_skip_dir(Path(directory) / name)
-        or (Path(directory) / name).is_symlink()
+        if name in SKIPPED_DIRECTORY_NAMES
+        or name.endswith(".dir")
+        or (current / name).is_symlink()
     }
 
 
@@ -127,7 +128,6 @@ def build_and_install(
             "-B",
             str(build),
             *generator_arguments(),
-            "-DBUILD_SHARED_LIBS=ON",
             f"-D{name}_BUILD_TESTS=OFF",
             "-DCMAKE_BUILD_TYPE=Release",
         ]
@@ -147,144 +147,13 @@ def build_and_install(
     return install
 
 
-def installed_library_files(install_dir: Path, name: str) -> list[Path]:
-    return sorted(install_dir.glob(f"lib*/lib{name}.so*"))
-
-
-def expected_library_names(
-    name: str, version: tuple[int, int, int]
-) -> tuple[str, str, str]:
-    return (
-        f"lib{name}.so",
-        f"lib{name}.so.{format_series(version)}",
-        f"lib{name}.so.{format_version(version)}",
-    )
-
-
-def soname_tool() -> str | None:
-    for tool in ("objdump", "readelf"):
-        if shutil.which(tool) is not None:
-            return tool
-    return None
-
-
-def read_soname(library: Path, tool: str) -> str:
-    if tool == "objdump":
-        result = subprocess.run(
-            ["objdump", "-p", str(library)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            raise AssertionError(
-                f"objdump failed for {library} with exit code "
-                f"{result.returncode}:\n{output}"
-            )
-        for line in result.stdout.splitlines():
-            fields = line.split()
-            if fields and fields[0] == "SONAME":
-                return fields[-1]
-    else:
-        result = subprocess.run(
-            ["readelf", "-d", str(library)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            raise AssertionError(
-                f"readelf failed for {library} with exit code "
-                f"{result.returncode}:\n{output}"
-            )
-        for line in result.stdout.splitlines():
-            match = re.search(r"\(SONAME\).*\[(?P<soname>[^\]]+)\]", line)
-            if match is not None:
-                return match.group("soname")
-    raise AssertionError(f"Could not read a SONAME from {library} with {tool}.")
-
-
-def check_soname(
-    case: unittest.TestCase,
-    install_dir: Path,
-    name: str,
-    version: tuple[int, int, int],
-) -> None:
-    tool = soname_tool()
-    if tool is None:
-        case.skipTest("Neither objdump nor readelf is available.")
-    expected = f"lib{name}.so.{format_series(version)}"
-    full_name = expected_library_names(name, version)[2]
-    files = installed_library_files(install_dir, name)
-    library = next((path for path in files if path.name == full_name), None)
-    if library is None:
-        case.fail(
-            f"Expected an installed library named {full_name} under "
-            f"{install_dir}, but found "
-            f"{[path.name for path in files]}."
-        )
-    actual = read_soname(library, tool)
-    case.assertEqual(
-        actual,
-        expected,
-        f"SONAME mismatch for {library}: expected {expected!r}, "
-        f"got {actual!r}.",
-    )
-
-
-def check_symlink_chain(
-    case: unittest.TestCase,
-    install_dir: Path,
-    name: str,
-    version: tuple[int, int, int],
-) -> None:
-    unversioned_name, series_name, full_name = expected_library_names(
-        name, version
-    )
-    files = installed_library_files(install_dir, name)
-    actual_names = [path.name for path in files]
-    case.assertEqual(
-        sorted(actual_names),
-        sorted([unversioned_name, series_name, full_name]),
-        f"Expected exactly three library entries under {install_dir}: "
-        f"{[unversioned_name, series_name, full_name]}; got {actual_names}.",
-    )
-    by_name = {path.name: path for path in files}
-    unversioned = by_name[unversioned_name]
-    series = by_name[series_name]
-    full = by_name[full_name]
-
-    case.assertTrue(
-        unversioned.is_symlink(),
-        f"{unversioned_name} must be a symbolic link, but it is a regular "
-        "file.",
-    )
-    case.assertTrue(
-        series.is_symlink(),
-        f"{series_name} must be a symbolic link, but it is a regular file.",
-    )
-    case.assertFalse(
-        full.is_symlink(),
-        f"{full_name} must be a regular file, but it is a symbolic link.",
-    )
-    case.assertTrue(
-        full.is_file(),
-        f"{full_name} must be a regular file, but it does not exist.",
-    )
-    case.assertEqual(
-        unversioned.readlink().name,
-        series_name,
-        f"{unversioned_name} must point to {series_name}, but it points to "
-        f"{unversioned.readlink()}.",
-    )
-    case.assertEqual(
-        series.readlink().name,
-        full_name,
-        f"{series_name} must point to {full_name}, but it points to "
-        f"{series.readlink()}.",
-    )
+def installed_library_files(install_dir: Path) -> list[Path]:
+    matches: set[Path] = set()
+    for pattern in LIBRARY_GLOB_PATTERNS:
+        for path in install_dir.rglob(pattern):
+            if path.is_file() or path.is_symlink():
+                matches.add(path)
+    return sorted(matches)
 
 
 def compatibility_requests(
@@ -319,8 +188,12 @@ def probe_config_version(
     version_file: Path,
     requests: list[str],
     temp_dir: Path,
-) -> dict[str, bool]:
+    pointer_size: int | None = None,
+) -> dict[str, tuple[bool, bool]]:
+    """Return each request's (compatible, unsuitable) probe result."""
     lines: list[str] = []
+    if pointer_size is not None:
+        lines.append(f"set(CMAKE_SIZEOF_VOID_P {pointer_size})")
     for request in requests:
         components = [int(part) for part in request.split(".")]
         count = len(components)
@@ -338,9 +211,14 @@ def probe_config_version(
                 "unset(PACKAGE_VERSION_UNSUITABLE)",
                 f'include("{version_file.as_posix()}")',
                 "if(PACKAGE_VERSION_COMPATIBLE)",
-                f'  message("RESULT|{request}|TRUE")',
+                f'  message("RESULT|{request}|COMPATIBLE|TRUE")',
                 "else()",
-                f'  message("RESULT|{request}|FALSE")',
+                f'  message("RESULT|{request}|COMPATIBLE|FALSE")',
+                "endif()",
+                "if(PACKAGE_VERSION_UNSUITABLE)",
+                f'  message("RESULT|{request}|UNSUITABLE|TRUE")',
+                "else()",
+                f'  message("RESULT|{request}|UNSUITABLE|FALSE")',
                 "endif()",
             ]
         )
@@ -360,13 +238,23 @@ def probe_config_version(
             f"cmake -P failed with exit code {result.returncode}:\n{output}"
         )
 
-    results: dict[str, bool] = {}
+    compatible_values: dict[str, bool] = {}
+    unsuitable_values: dict[str, bool] = {}
     for line in output.splitlines():
         if not line.startswith("RESULT|"):
             continue
-        _, request, value = line.split("|")
-        results[request] = value == "TRUE"
-    return results
+        _, request, kind, value = line.split("|")
+        if kind == "COMPATIBLE":
+            compatible_values[request] = value == "TRUE"
+        elif kind == "UNSUITABLE":
+            unsuitable_values[request] = value == "TRUE"
+    return {
+        request: (
+            compatible_values[request],
+            unsuitable_values[request],
+        )
+        for request in requests
+    }
 
 
 def check_config_version(
@@ -382,9 +270,13 @@ def check_config_version(
     with tempfile.TemporaryDirectory(
         prefix="package-version-probe-"
     ) as temp:
-        actual = probe_config_version(
+        probes = probe_config_version(
             version_file, list(expected), Path(temp)
         )
+    actual = {
+        request: compatible
+        for request, (compatible, _) in probes.items()
+    }
     case.assertEqual(
         actual,
         expected,
@@ -393,13 +285,81 @@ def check_config_version(
     )
 
 
+def check_architecture_independence(
+    case: unittest.TestCase,
+    install_dir: Path,
+    name: str,
+    version: tuple[int, int, int],
+) -> None:
+    version_file = find_config_version(install_dir, name)
+    request = format_version(version)
+    with tempfile.TemporaryDirectory(
+        prefix="package-architecture-probe-"
+    ) as temp:
+        for pointer_size in (4, 8):
+            with case.subTest(pointer_size=pointer_size):
+                compatible, unsuitable = probe_config_version(
+                    version_file,
+                    [request],
+                    Path(temp),
+                    pointer_size=pointer_size,
+                )[request]
+                case.assertTrue(
+                    compatible,
+                    f"{version_file} is not compatible with its own "
+                    f"version {request} for a {pointer_size}-byte pointer.",
+                )
+                case.assertFalse(
+                    unsuitable,
+                    f"{version_file} is unsuitable for a "
+                    f"{pointer_size}-byte pointer, so it is not "
+                    "architecture independent.",
+                )
+
+
+def check_no_library_files(
+    case: unittest.TestCase, install_dir: Path
+) -> None:
+    library_files = installed_library_files(install_dir)
+    relative = [
+        str(path.relative_to(install_dir)) for path in library_files
+    ]
+    case.assertEqual(
+        library_files,
+        [],
+        f"The header-only install tree {install_dir} contains library "
+        f"files: {relative}.",
+    )
+
+
+def check_header_and_templates(
+    case: unittest.TestCase,
+    install_dir: Path,
+    name: str,
+) -> None:
+    version_file = find_config_version(install_dir, name)
+    package_dir = version_file.parent
+    expected_files = [
+        install_dir / "include" / name / "version_info.h",
+        package_dir / f"{name}Declare.cmake",
+        package_dir / "templates" / "version_info.h.in",
+        package_dir / "templates" / "plugin_info.cc.in",
+    ]
+    for path in expected_files:
+        case.assertTrue(
+            path.is_file(),
+            f"The header-only install tree {install_dir} is missing "
+            f"{path.relative_to(install_dir)}.",
+        )
+
+
 def check_readme_install_contract(case: unittest.TestCase) -> None:
     text = README.read_text(encoding="utf-8")
     match = INSTALL_CONTRACT_RE.search(text)
     if match is None:
         case.fail("README.md has no '## Install Contract' section.")
     section = match.group(1)
-    for required in ("`SOVERSION`", "`major.minor`", "`SameMinorVersion`"):
+    for required in ("`SameMinorVersion`", "`ARCH_INDEPENDENT`"):
         case.assertIn(
             required,
             section,
@@ -415,7 +375,7 @@ class InstallContractDocsTest(unittest.TestCase):
 
 @unittest.skipUnless(
     sys.platform.startswith("linux"),
-    "SONAME and .so naming checks require Linux.",
+    "The install tree and package version checks require Linux.",
 )
 @unittest.skipUnless(
     shutil.which("cmake") is not None,
@@ -453,29 +413,33 @@ class PackageVersionContractTest(unittest.TestCase):
             cls.name,
         )
 
-    def test_soname_matches_major_minor(self) -> None:
-        for install_dir, version in (
+    def installations(self) -> list[tuple[Path, tuple[int, int, int]]]:
+        return [
             (self.current_install, self.version),
             (self.future_install, FUTURE_VERSION),
-        ):
-            with self.subTest(version=format_version(version)):
-                check_soname(self, install_dir, self.name, version)
-
-    def test_symlink_chain_uses_the_full_version(self) -> None:
-        for install_dir, version in (
-            (self.current_install, self.version),
-            (self.future_install, FUTURE_VERSION),
-        ):
-            with self.subTest(version=format_version(version)):
-                check_symlink_chain(self, install_dir, self.name, version)
+        ]
 
     def test_package_version_file_accepts_only_the_same_minor(self) -> None:
-        for install_dir, version in (
-            (self.current_install, self.version),
-            (self.future_install, FUTURE_VERSION),
-        ):
+        for install_dir, version in self.installations():
             with self.subTest(version=format_version(version)):
                 check_config_version(self, install_dir, self.name, version)
+
+    def test_package_version_file_is_architecture_independent(self) -> None:
+        for install_dir, version in self.installations():
+            with self.subTest(version=format_version(version)):
+                check_architecture_independence(
+                    self, install_dir, self.name, version
+                )
+
+    def test_install_tree_has_no_library_files(self) -> None:
+        for install_dir, version in self.installations():
+            with self.subTest(version=format_version(version)):
+                check_no_library_files(self, install_dir)
+
+    def test_install_tree_has_header_and_templates(self) -> None:
+        for install_dir, version in self.installations():
+            with self.subTest(version=format_version(version)):
+                check_header_and_templates(self, install_dir, self.name)
 
 
 if __name__ == "__main__":

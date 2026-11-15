@@ -1,52 +1,46 @@
 cmake_minimum_required(VERSION 4.2)
 
-project(mylib VERSION 0.1.0 LANGUAGES CXX)
+project(eversion
+  VERSION 0.1.0
+  DESCRIPTION "Easy macro-free version metadata helpers for C++20"
+  LANGUAGES CXX
+)
 
-# The template does not use C++20 modules. Module scanning would add GCC-only
+# EVersion does not use C++20 modules. Module scanning would add GCC-only
 # flags to compile_commands.json, which clang-tidy rejects.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
-include(cmake/mylibOptions.cmake)
-include(cmake/mylibCompiler.cmake)
-include(cmake/mylibDocs.cmake)
-include(cmake/mylibInstall.cmake)
-include(GenerateExportHeader)
+include(cmake/eversionOptions.cmake)
+include(cmake/eversionCompiler.cmake)
+include(cmake/eversionDocs.cmake)
+include(cmake/eversionInstall.cmake)
 
-add_library(${PROJECT_NAME}
-  src/${PROJECT_NAME}.cc
-)
+add_library(${PROJECT_NAME} INTERFACE)
 add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-target_compile_features(${PROJECT_NAME}
-  PUBLIC
-    cxx_std_20
-)
-
-mylib_configure_cxx_target(${PROJECT_NAME})
+eversion_configure_cxx_interface_target(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME}
-  PUBLIC
+  INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-target_include_directories(${PROJECT_NAME}
-  SYSTEM PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
+set(EVERSION_TEMPLATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/templates"
+  CACHE INTERNAL "Path to EVersion generated-header templates")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/eversionDeclare.cmake")
 
-# Only patch releases are ABI compatible, so SOVERSION is always major.minor.
-set_target_properties(${PROJECT_NAME} PROPERTIES
-  CXX_VISIBILITY_PRESET hidden
-  VISIBILITY_INLINES_HIDDEN ON
-  VERSION ${PROJECT_VERSION}
-  SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+set(eversion_declare_args
+  NAMESPACE eversion::version_info
+  MAJOR ${PROJECT_VERSION_MAJOR}
+  MINOR ${PROJECT_VERSION_MINOR}
+  PATCH ${PROJECT_VERSION_PATCH}
+  OUTPUT eversion/version_info.h
 )
-
-generate_export_header(${PROJECT_NAME}
-  BASE_NAME ${PROJECT_NAME}
-  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/include/${PROJECT_NAME}/export.h
-)
+if(NOT ${PROJECT_NAME}_INSTALL)
+  list(APPEND eversion_declare_args NO_INSTALL)
+endif()
+eversion_declare(${PROJECT_NAME} ${eversion_declare_args})
 
 if(${PROJECT_NAME}_BUILD_TESTS)
   enable_testing()
@@ -54,9 +48,9 @@ if(${PROJECT_NAME}_BUILD_TESTS)
 endif()
 
 if(${PROJECT_NAME}_INSTALL)
-  mylib_install_package(${PROJECT_NAME})
+  eversion_install_package(${PROJECT_NAME})
 endif()
 
 if(${PROJECT_NAME}_BUILD_DOCS)
-  mylib_add_docs_target()
+  eversion_add_docs_target()
 endif()
