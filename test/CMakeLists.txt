@@ -21,6 +21,16 @@ eversion_declare(eversion_test_consumer
   NO_INSTALL
 )
 
+add_library(eversion_leading_zero_consumer INTERFACE)
+eversion_declare(eversion_leading_zero_consumer
+  NAMESPACE eversion_leading_zero::version_info
+  MAJOR 010
+  MINOR 09
+  PATCH 000
+  OUTPUT eversion_leading_zero/version_info.h
+  NO_INSTALL
+)
+
 add_executable(${PROJECT_NAME}_test
   version_test.cc
   version_declare_test.cc
@@ -31,6 +41,7 @@ target_link_libraries(${PROJECT_NAME}_test
   PRIVATE
     ${PROJECT_NAME}::${PROJECT_NAME}
     eversion_test_consumer
+    eversion_leading_zero_consumer
     GTest::gtest_main
 )
 
@@ -46,13 +57,14 @@ set_target_properties(eversion_test_plugin PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/plugins"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/plugins"
 )
+# Leading zeros are intentional here: they exercise plugin path normalization.
 eversion_declare_plugin(eversion_test_plugin
   ID test.plugin
   NAME "EVersion Test Plugin"
   NAMESPACE eversion_test_plugin::version_info
-  MAJOR 9
-  MINOR 8
-  PATCH 7
+  MAJOR 09
+  MINOR 08
+  PATCH 07
   PRERELEASE beta.2
   BUILD_METADATA build.42
   OUTPUT eversion_test_plugin/version_info.h

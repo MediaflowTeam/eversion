@@ -111,3 +111,26 @@ _eversion_expect_configure_success("no_install"
 "    message(FATAL_ERROR \\\"NO_INSTALL must not add INSTALL_INTERFACE include dirs\\\")\n"
 "  endif()\n"
 "endforeach()\n")
+
+_eversion_expect_configure_success("leading_zero_versions"
+"add_library(leading_zero INTERFACE)\n"
+"eversion_declare(leading_zero NAMESPACE leading_zero::version_info MAJOR 010 MINOR 09 PATCH 0000000000000000000007 OUTPUT leading_zero/version_info.h NO_INSTALL)\n"
+"get_target_property(version_string leading_zero EVERSION_VERSION_STRING)\n"
+"if(NOT version_string STREQUAL \"10.9.7\")\n"
+"  message(FATAL_ERROR \"EVERSION_VERSION_STRING was '\${version_string}', expected '10.9.7'\")\n"
+"endif()\n")
+
+_eversion_expect_configure_success("maximum_version"
+"add_library(maximum_version INTERFACE)\n"
+"eversion_declare(maximum_version NAMESPACE maximum_version::version_info MAJOR 4294967295 MINOR 0 PATCH 0 OUTPUT maximum_version/version_info.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure("version_number_overflow"
+"add_library(version_number_overflow INTERFACE)\n"
+"eversion_declare(version_number_overflow NAMESPACE version_number_overflow::version_info MAJOR 4294967296 MINOR 0 PATCH 0 OUTPUT version_number_overflow/version_info.h NO_INSTALL)\n")
+
+set(plugin_overflow_case_dir "${work_dir}/plugin_version_overflow")
+file(MAKE_DIRECTORY "${plugin_overflow_case_dir}")
+file(WRITE "${plugin_overflow_case_dir}/plugin_overflow.cpp" "")
+_eversion_expect_configure_failure("plugin_version_overflow"
+"add_library(plugin_overflow MODULE plugin_overflow.cpp)\n"
+"eversion_declare_plugin(plugin_overflow ID test.plugin NAME \"Test Plugin\" NAMESPACE plugin_overflow::version_info MAJOR 0 MINOR 4294967296 PATCH 0 OUTPUT plugin_overflow/version_info.h NO_INSTALL)\n")

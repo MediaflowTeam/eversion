@@ -161,6 +161,11 @@ when a project intentionally installs public headers somewhere other than
 `${CMAKE_INSTALL_INCLUDEDIR}`. `OUTPUT` must be a safe relative path, and each
 configure may use a generated `NAMESPACE` or `OUTPUT` only once.
 
+`MAJOR`, `MINOR`, and `PATCH` are decimal numbers. Leading zeros are dropped,
+so `project(sample_core VERSION 2026.09.1)` with the arguments above generates
+`kVersionMinor == 9` and `kVersionString == "2026.9.1"`. A value above
+4294967295 stops the configure step with an error.
+
 ## Generate Version Metadata for a Dynamic Plugin
 
 If a host application loads dynamic plugins at runtime, each plugin can export a
@@ -313,15 +318,28 @@ if (parsed.has_value()) {
 }
 ```
 
+`AsVersion()` returns a view into the `RuntimeVersion` it is called on, so keep
+that object alive while the view is in use. Calling it on an rvalue, such as
+`TryParseVersion(text).value().AsVersion()`, does not compile. The compiler
+cannot catch `TryParseVersion(text)->AsVersion()`, which also leaves a dangling
+view: store the parsed value in a variable first, as above.
+
 `TryParseVersion()` accepts `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`. Core
 components must fit in `std::uint32_t`; prerelease and build metadata use the
 same dot-separated identifier grammar as `eversion_declare()`.
+
+Leading zeros are read as numbers, as in `eversion_declare()`, and are not
+rejected as strict SemVer would. In the core, they are dropped:
+`TryParseVersion("01.2.3")` gives 1.2.3. A numeric prerelease identifier keeps
+its text but compares by value, so `1.2.3-rc.007` prints as written and is
+weakly equivalent to `1.2.3-rc.7`.
 
 Version comparison rules:
 
 - `major`, `minor`, and `patch` are compared numerically.
 - A version with a prerelease tag ranks below the same final version.
-- Numeric prerelease identifiers are compared numerically.
+- Numeric prerelease identifiers are compared numerically, ignoring leading
+  zeros.
 - Numeric prerelease identifiers rank below non-numeric identifiers.
 - Build metadata is informational and does not affect precedence.
 
@@ -444,7 +462,6 @@ Build options:
 | `eversion_BUILD_DOCS` | OFF | Add the `eversion_docs` Doxygen target. |
 | `eversion_WARNINGS_AS_ERRORS` | OFF | Add `-Werror`, and make Doxygen warnings errors. |
 | `eversion_ENABLE_SANITIZERS` | OFF | AddressSanitizer and UndefinedBehaviorSanitizer. |
-| `eversion_ENABLE_THREAD_SANITIZER` | OFF | ThreadSanitizer; cannot be combined with the previous option. |
 | `eversion_ENABLE_COVERAGE` | OFF | gcov coverage instrumentation. |
 
 ## Install Contract
@@ -513,14 +530,11 @@ QUALITY_CMAKE_ARGS="-DCMAKE_CXX_COMPILER=clang++" python3 scripts/quality.py che
 cmake --preset asan-ubsan
 cmake --build --preset asan-ubsan
 ctest --preset asan-ubsan
-cmake --preset tsan
-cmake --build --preset tsan
-ctest --preset tsan
 ```
 
 The `asan-ubsan` preset compiles with `-fno-sanitize-recover=all`, so any UndefinedBehaviorSanitizer report fails the test instead of only printing a diagnostic.
 
-The `tsan` preset builds with ThreadSanitizer, which makes a test fail when it reports a data race. ThreadSanitizer cannot be combined with AddressSanitizer, so configuring with both `eversion_ENABLE_SANITIZERS` and `eversion_ENABLE_THREAD_SANITIZER` turned on fails. If ThreadSanitizer aborts with `unexpected memory mapping` or `incompatible memory layout`, the kernel's mmap randomization breaks its memory layout. Run the build and the tests under `setarch "$(uname -m)" -R`, which turns randomization off for them and does not need root, as the CI job does. The build needs it too, because it runs the test executable to list the tests. In a Docker container, `setarch` also needs `--security-opt seccomp=unconfined`. Lowering the randomization for the whole system with `sudo sysctl vm.mmap_rnd_bits=28` works as well.
+EVersion has no ThreadSanitizer preset: the library has no threads or shared mutable state, so there is nothing for it to check.
 
 To see which lines of `include/` the tests run, generate a coverage report. It needs gcovr; see [Tool Versions](docs/tool-versions.md).
 

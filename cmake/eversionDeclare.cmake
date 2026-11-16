@@ -32,14 +32,18 @@ if(COMMAND eversion_declare AND COMMAND eversion_declare_plugin)
   return()
 endif()
 
-if(NOT DEFINED EVERSION_TEMPLATE_DIR)
-  if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../templates/version_info.h.in")
-    set(EVERSION_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/../templates"
-      CACHE INTERNAL "Path to EVersion generated-header templates")
-  elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/templates/version_info.h.in")
-    set(EVERSION_TEMPLATE_DIR "${CMAKE_CURRENT_LIST_DIR}/templates"
-      CACHE INTERNAL "Path to EVersion generated-header templates")
-  endif()
+set(_EVERSION_DISCOVERED_TEMPLATE_DIR "")
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/templates/version_info.h.in")
+  set(_EVERSION_DISCOVERED_TEMPLATE_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/templates")
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../templates/version_info.h.in")
+  get_filename_component(_EVERSION_DISCOVERED_TEMPLATE_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/../templates" ABSOLUTE)
+endif()
+
+if(NOT _EVERSION_DISCOVERED_TEMPLATE_DIR STREQUAL "")
+  set(EVERSION_TEMPLATE_DIR "${_EVERSION_DISCOVERED_TEMPLATE_DIR}"
+    CACHE INTERNAL "Path to EVersion generated-header templates")
 endif()
 
 set(_EVERSION_DECLARE_TEMPLATE
@@ -73,6 +77,40 @@ function(_eversion_normalize_relative_path target_name argument_name path_value
   endif()
 
   set("${output_variable}" "${normalized_path}" PARENT_SCOPE)
+endfunction()
+
+function(_eversion_normalize_version_number target_name argument_name
+  number_value output_variable)
+  if(NOT number_value MATCHES "^[0-9]+$")
+    message(FATAL_ERROR
+      "${target_name}: ${argument_name}="
+      "'${number_value}' must be a non-negative integer")
+  endif()
+
+  string(REGEX REPLACE "^0+" "" normalized_number "${number_value}")
+  if(normalized_number STREQUAL "")
+    set(normalized_number "0")
+  endif()
+
+  set(maximum_version_number "4294967295")
+  string(LENGTH "${normalized_number}" normalized_length)
+  string(LENGTH "${maximum_version_number}" maximum_length)
+  set(number_is_too_large FALSE)
+  if(normalized_length GREATER maximum_length)
+    set(number_is_too_large TRUE)
+  elseif(normalized_length EQUAL maximum_length)
+    if(normalized_number STRGREATER "${maximum_version_number}")
+      set(number_is_too_large TRUE)
+    endif()
+  endif()
+
+  if(number_is_too_large)
+    message(FATAL_ERROR
+      "${target_name}: ${argument_name}='${number_value}' must not be "
+      "greater than ${maximum_version_number}")
+  endif()
+
+  set("${output_variable}" "${normalized_number}" PARENT_SCOPE)
 endfunction()
 
 function(_eversion_register_unique_value target_name kind value property_name)
@@ -155,11 +193,10 @@ function(eversion_declare target_name)
 
   foreach(number_arg IN ITEMS MAJOR MINOR PATCH)
     set(number_value "${EV_${number_arg}}")
-    if(NOT number_value MATCHES "^[0-9]+$")
-      message(FATAL_ERROR
-        "eversion_declare(${target_name}): ${number_arg}="
-        "'${number_value}' must be a non-negative integer")
-    endif()
+    _eversion_normalize_version_number(
+      "eversion_declare(${target_name})" "${number_arg}" "${number_value}"
+      normalized_number)
+    set("EV_${number_arg}" "${normalized_number}")
   endforeach()
 
   if(NOT DEFINED EV_PRERELEASE)
@@ -404,6 +441,16 @@ function(eversion_declare_plugin target_name)
   endif()
   eversion_declare("${target_name}" ${declare_args})
 
+  _eversion_normalize_version_number(
+    "eversion_declare_plugin(${target_name})" MAJOR "${EVP_MAJOR}"
+    plugin_major)
+  _eversion_normalize_version_number(
+    "eversion_declare_plugin(${target_name})" MINOR "${EVP_MINOR}"
+    plugin_minor)
+  _eversion_normalize_version_number(
+    "eversion_declare_plugin(${target_name})" PATCH "${EVP_PATCH}"
+    plugin_patch)
+
   if(NOT EXISTS "${_EVERSION_PLUGIN_INFO_TEMPLATE}")
     message(FATAL_ERROR
       "eversion_declare_plugin(${target_name}): template "
@@ -418,9 +465,9 @@ function(eversion_declare_plugin target_name)
   set(EVERSION_PLUGIN_ID "${EVP_ID}")
   set(EVERSION_PLUGIN_NAME "${EVP_NAME}")
   set(EVERSION_PLUGIN_SYMBOL "${EVP_SYMBOL}")
-  set(EVERSION_MAJOR_LITERAL "${EVP_MAJOR}U")
-  set(EVERSION_MINOR_LITERAL "${EVP_MINOR}U")
-  set(EVERSION_PATCH_LITERAL "${EVP_PATCH}U")
+  set(EVERSION_MAJOR_LITERAL "${plugin_major}U")
+  set(EVERSION_MINOR_LITERAL "${plugin_minor}U")
+  set(EVERSION_PATCH_LITERAL "${plugin_patch}U")
   if(DEFINED EVP_PRERELEASE)
     set(EVERSION_PRERELEASE "${EVP_PRERELEASE}")
   else()

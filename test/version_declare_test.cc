@@ -8,6 +8,7 @@
 #include <eversion/version.h>
 #include <eversion/version_info.h>
 #include <eversion_demo/version_info.h>
+#include <eversion_leading_zero/version_info.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -38,6 +39,10 @@ static_assert(eversion::version_info::kVersionString == "0.1.0");
 static_assert(eversion_demo::version_info::kVersionMajor == 1U);
 static_assert(eversion_demo::version_info::kVersionString ==
               "1.2.3-rc.1+git.deadbeef");
+static_assert(eversion_leading_zero::version_info::kVersionMajor == 10U);
+static_assert(eversion_leading_zero::version_info::kVersionMinor == 9U);
+static_assert(eversion_leading_zero::version_info::kVersionPatch == 0U);
+static_assert(eversion_leading_zero::version_info::kVersionString == "10.9.0");
 static_assert(eversion_demo::version_info::kVersion <
               eversion::Version{.major = 1,
                                 .minor = 2,
