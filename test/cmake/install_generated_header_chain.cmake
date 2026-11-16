@@ -100,3 +100,41 @@ _eversion_contract_run("build final consumer"
 
 _eversion_contract_run("run final consumer"
   "${consumer_build}/final_consumer")
+
+set(eversion_prefix_b "${work_dir}/eversion-prefix-b")
+_eversion_contract_run("install eversion to second prefix"
+  "${CMAKE_COMMAND}" --install "${EVERSION_BUILD_DIR}"
+  --prefix "${eversion_prefix_b}")
+
+file(REMOVE_RECURSE "${eversion_prefix}")
+
+file(GLOB eversion_package_dirs
+  "${eversion_prefix_b}/lib*/cmake/eversion")
+list(LENGTH eversion_package_dirs eversion_package_dir_count)
+if(NOT eversion_package_dir_count EQUAL 1)
+  message(FATAL_ERROR
+    "expected one eversion package directory under '${eversion_prefix_b}', "
+    "found ${eversion_package_dir_count}: ${eversion_package_dirs}")
+endif()
+list(GET eversion_package_dirs 0 eversion_package_dir)
+
+_eversion_contract_run("reconfigure producer with second eversion prefix"
+  "${CMAKE_COMMAND}"
+  -S "${EVERSION_SOURCE_DIR}/test/cmake/install_producer"
+  -B "${producer_build}"
+  ${eversion_configure_args}
+  "-Deversion_DIR=${eversion_package_dir}")
+
+load_cache("${producer_build}" READ_WITH_PREFIX producer_cached_
+  EVERSION_TEMPLATE_DIR)
+set(producer_template_dir "${producer_cached_EVERSION_TEMPLATE_DIR}")
+string(FIND "${producer_template_dir}" "${eversion_prefix_b}/"
+  template_prefix_position)
+if(template_prefix_position LESS 0)
+  message(FATAL_ERROR
+    "producer EVERSION_TEMPLATE_DIR='${producer_template_dir}' is not "
+    "under the second eversion prefix '${eversion_prefix_b}'")
+endif()
+
+_eversion_contract_run("rebuild producer with second eversion prefix"
+  "${CMAKE_COMMAND}" --build "${producer_build}")
