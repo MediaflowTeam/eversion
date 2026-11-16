@@ -13,6 +13,7 @@
 #include <limits>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace {
 
@@ -26,6 +27,14 @@ constexpr eversion::Version V(std::uint32_t major, std::uint32_t minor,
                            .prerelease = prerelease,
                            .build_metadata = build_metadata};
 }
+
+template <typename T>
+concept CanCallAsVersion = requires { std::declval<T>().AsVersion(); };
+
+static_assert(CanCallAsVersion<eversion::RuntimeVersion&>);
+static_assert(CanCallAsVersion<const eversion::RuntimeVersion&>);
+static_assert(!CanCallAsVersion<eversion::RuntimeVersion>);
+static_assert(!CanCallAsVersion<const eversion::RuntimeVersion>);
 
 TEST(Version, EqualityIgnoresBuildMetadata) {
   EXPECT_EQ(V(1, 2, 3), V(1, 2, 3));
@@ -41,6 +50,21 @@ TEST(Version, SpaceshipUsesWeakOrderingForMetadataEquivalence) {
             std::weak_ordering::equivalent);
   EXPECT_EQ(V(1, 2, 3, {}, "git.aaa").ToString(), "1.2.3+git.aaa");
   EXPECT_EQ(V(1, 2, 3, {}, "git.bbb").ToString(), "1.2.3+git.bbb");
+}
+
+TEST(Version, CoreComponentsCompareLexicographically) {
+  EXPECT_LT(V(1, 5, 5), V(2, 5, 5));
+  EXPECT_GT(V(2, 5, 5), V(1, 5, 5));
+  EXPECT_LT(V(1, 2, 5), V(1, 3, 5));
+  EXPECT_GT(V(1, 3, 5), V(1, 2, 5));
+  EXPECT_LT(V(1, 2, 3), V(1, 2, 4));
+  EXPECT_GT(V(1, 2, 4), V(1, 2, 3));
+
+  EXPECT_LT(V(1, 9, 9), V(2, 0, 0));
+  EXPECT_LT(V(1, 1, 9), V(1, 2, 0));
+
+  EXPECT_LT(V(1, 2, 3, "alpha"), V(1, 2, 3));
+  EXPECT_GT(V(1, 2, 3), V(1, 2, 3, "alpha"));
 }
 
 TEST(Version, PrecedenceOrdering) {
@@ -59,6 +83,12 @@ TEST(Version, Stability) {
 TEST(Version, ToStringIncludesPrereleaseAndBuildMetadata) {
   EXPECT_EQ(V(1, 2, 3, "rc.1", "git.deadbeef").ToString(),
             "1.2.3-rc.1+git.deadbeef");
+}
+
+TEST(Version, ToStringFormatsEachOptionalPart) {
+  EXPECT_EQ(V(1, 2, 3).ToString(), "1.2.3");
+  EXPECT_EQ(V(1, 2, 3, "rc.1").ToString(), "1.2.3-rc.1");
+  EXPECT_EQ(V(0, 0, 4294967295U).ToString(), "0.0.4294967295");
 }
 
 TEST(Version, RuntimeVersionOwnsStringsAndExposesVersionView) {
@@ -111,6 +141,26 @@ TEST(Version, TryParseVersionAcceptsSupportedForms) {
   EXPECT_EQ(hyphenated_metadata_version.build_metadata, "build-42");
 }
 
+TEST(Version, LeadingZerosAreReadAsNumbers) {
+  const eversion::RuntimeVersion core_leading_zeros =
+      eversion::TryParseVersion("01.002.0003")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(core_leading_zeros.major, 1U);
+  EXPECT_EQ(core_leading_zeros.minor, 2U);
+  EXPECT_EQ(core_leading_zeros.patch, 3U);
+  EXPECT_EQ(core_leading_zeros.ToString(), "1.2.3");
+
+  const eversion::RuntimeVersion prerelease_leading_zeros =
+      eversion::TryParseVersion("1.2.3-rc.007")
+          .value_or(eversion::RuntimeVersion{});
+  EXPECT_EQ(prerelease_leading_zeros.prerelease, "rc.007");
+  EXPECT_EQ(prerelease_leading_zeros.ToString(), "1.2.3-rc.007");
+
+  const eversion::Version prerelease_view =
+      prerelease_leading_zeros.AsVersion();
+  EXPECT_EQ(prerelease_view, V(1, 2, 3, "rc.7"));
+}
+
 TEST(Version, TryParseVersionRejectsInvalidForms) {
   EXPECT_FALSE(eversion::TryParseVersion("").has_value());
   EXPECT_FALSE(eversion::TryParseVersion("1.2").has_value());
@@ -141,5 +191,11 @@ static_assert(V(1, 2, 3, {}, "x") == V(1, 2, 3, {}, "y"));
 static_assert((V(1, 2, 3, {}, "x") <=> V(1, 2, 3, {}, "y")) ==
               std::weak_ordering::equivalent);
 static_assert(V(1, 0, 0).IsStable());
+static_assert(V(1, 5, 5) < V(2, 5, 5));
+static_assert(V(1, 2, 5) < V(1, 3, 5));
+static_assert(V(1, 2, 3) < V(1, 2, 4));
+static_assert(V(1, 9, 9) < V(2, 0, 0));
+static_assert(V(1, 1, 9) < V(1, 2, 0));
+static_assert(V(1, 2, 3, "alpha") < V(1, 2, 3));
 
 }  // namespace

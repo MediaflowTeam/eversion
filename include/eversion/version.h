@@ -9,12 +9,12 @@
 #define EVERSION_VERSION_H_
 
 #include <eversion/detail/semver_precedence.h>
-#include <eversion/detail/version_ordering.h>
 
 #include <compare>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 /**
  * @brief Version metadata API for EVersion.
@@ -102,20 +102,13 @@ struct Version {
 
 [[nodiscard]] constexpr std::weak_ordering operator<=>(
     const Version& left, const Version& right) noexcept {
-  if (const std::strong_ordering order = left.major <=> right.major;
-      order != std::strong_ordering::equal) {
-    return detail::ToWeakOrdering(order);
+  const std::strong_ordering core_order =
+      std::tie(left.major, left.minor, left.patch) <=>
+      std::tie(right.major, right.minor, right.patch);
+  if (core_order != std::strong_ordering::equal) {
+    return core_order;
   }
-  if (const std::strong_ordering order = left.minor <=> right.minor;
-      order != std::strong_ordering::equal) {
-    return detail::ToWeakOrdering(order);
-  }
-  if (const std::strong_ordering order = left.patch <=> right.patch;
-      order != std::strong_ordering::equal) {
-    return detail::ToWeakOrdering(order);
-  }
-  return detail::ToWeakOrdering(
-      detail::ComparePrerelease(left.prerelease, right.prerelease));
+  return detail::ComparePrerelease(left.prerelease, right.prerelease);
 }
 
 [[nodiscard]] constexpr bool operator==(const Version& left,
@@ -124,19 +117,16 @@ struct Version {
 }
 
 inline std::string ToString(const Version& version) {
-  std::string text = std::to_string(version.major);
-  text.push_back('.');
-  text += std::to_string(version.minor);
-  text.push_back('.');
-  text += std::to_string(version.patch);
-
-  if (!version.prerelease.empty()) {
-    text.push_back('-');
-    text.append(version.prerelease.data(), version.prerelease.size());
+  std::string text = std::to_string(version.major) + '.' +
+                     std::to_string(version.minor) + '.' +
+                     std::to_string(version.patch);
+  if (version.HasPrerelease()) {
+    text += '-';
+    text += version.prerelease;
   }
-  if (!version.build_metadata.empty()) {
-    text.push_back('+');
-    text.append(version.build_metadata.data(), version.build_metadata.size());
+  if (version.HasBuildMetadata()) {
+    text += '+';
+    text += version.build_metadata;
   }
   return text;
 }
