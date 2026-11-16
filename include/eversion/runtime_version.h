@@ -24,6 +24,9 @@ namespace eversion {
  *
  * Use `AsVersion()` when APIs need the lightweight non-owning `Version` view.
  * The returned view remains valid until this object is modified or destroyed.
+ * Calling it on an rvalue `RuntimeVersion` is ill-formed. A temporary reached
+ * through a pointer, as in `TryParseVersion(text)->AsVersion()`, is not
+ * detected; store the parsed value in a variable before taking a view.
  */
 struct RuntimeVersion {
   /** @brief Major version component. */
@@ -38,7 +41,7 @@ struct RuntimeVersion {
   std::string build_metadata;
 
   /** @brief Returns a non-owning view of this runtime version. */
-  [[nodiscard]] Version AsVersion() const noexcept {
+  [[nodiscard]] Version AsVersion() const& noexcept {
     return Version{
         .major = major,
         .minor = minor,
@@ -47,6 +50,14 @@ struct RuntimeVersion {
         .build_metadata = build_metadata,
     };
   }
+
+  /**
+   * @brief Deleted overload that would return a view into an rvalue.
+   *
+   * The returned view would point at strings destroyed at the end of the full
+   * expression, so calling this on an rvalue `RuntimeVersion` is ill-formed.
+   */
+  [[nodiscard]] Version AsVersion() const&& = delete;
 
   /** @brief Returns whether this version represents a stable release. */
   [[nodiscard]] bool IsStable() const noexcept {
@@ -74,7 +85,9 @@ struct RuntimeVersion {
  *
  * Accepted syntax is `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`. Numeric core
  * components must fit in `std::uint32_t`; prerelease and build metadata use the
- * same dot-separated identifier grammar as `eversion_declare()`.
+ * same dot-separated identifier grammar as `eversion_declare()`. Leading zeros
+ * are read as numbers: `01.2.3` parses as 1.2.3, and a numeric prerelease
+ * identifier such as `007` keeps its text but compares equal to `7`.
  *
  * @param text Version string to parse.
  * @return Parsed runtime version, or `std::nullopt` when @p text is invalid.
