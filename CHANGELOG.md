@@ -35,14 +35,19 @@ the last state of the earlier one.
 - The tests moved from `tests/` to `test/`.
 - The `asan-ubsan` preset compiles with `-fno-sanitize-recover=all`, so an
   UndefinedBehaviorSanitizer report fails the test.
+- `RuntimeVersion::AsVersion()` no longer compiles when it is called on an
+  rvalue `RuntimeVersion`, such as a function's return value or
+  `TryParseVersion(text).value()`. The returned view would point at strings
+  destroyed at the end of the statement. Store the value in a variable first.
 
 ### Added
 
 - `examples/version_report`, a plugin host built only against the installed
   package and run by `quality.py check`.
-- The `tsan`, `coverage`, and `docs` presets, with the
-  `eversion_ENABLE_THREAD_SANITIZER`, `eversion_ENABLE_COVERAGE`, and
-  `eversion_BUILD_DOCS` options, and `scripts/coverage.py`.
+- The `coverage` and `docs` presets, with the `eversion_ENABLE_COVERAGE` and
+  `eversion_BUILD_DOCS` options, and `scripts/coverage.py`. The template's
+  ThreadSanitizer preset, option, and CI job were left out: EVersion has no
+  threads.
 - API documentation with Doxygen; the `eversion::detail` namespace is left out
   of it.
 - Contract tests under `scripts/` for the CMake, CI, packaging, and
@@ -53,6 +58,18 @@ the last state of the earlier one.
 
 ### Fixed
 
+- `eversion_declare()` and `eversion_declare_plugin()` drop leading zeros from
+  `MAJOR`, `MINOR`, and `PATCH`. Before, `MINOR 010` became the octal literal
+  `010U`, so `kVersionMinor` was 8 while `kVersionString` read `010`, and
+  `MINOR 09` did not compile. `project(VERSION 2026.09.1)` passes `09` this
+  way. The version string uses the same numbers, so it reads `2026.9.1`.
+- A `MAJOR`, `MINOR`, or `PATCH` value above 4294967295 stops the configure
+  step with an error. Before, it was silently truncated in the generated
+  constants.
+- `eversionDeclare.cmake` finds its templates next to itself on every
+  configure. Before, a consumer kept the template directory of the first
+  eversion installation it was configured with, so switching to another
+  installation either failed or used the old templates.
 - The plugin metadata test looks up `eversion::kPluginInfoSymbol` through a
   null-terminated copy, because a `std::string_view` does not guarantee a
   terminating null character. The README example does the same.
@@ -66,3 +83,6 @@ the last state of the earlier one.
 
 - Windows and macOS CI jobs, and the Windows code paths in the CMake functions
   and tests.
+- The `shared` dimension of the CI quality matrix, and `BUILD_SHARED_LIBS` in
+  `CMakePresets.json`. EVersion is header-only, so the variable affects no
+  target; the CI quality jobs went from four to two.
