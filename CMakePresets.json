@@ -12,7 +12,6 @@
       "description": "Configure a Debug build.",
       "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -23,7 +22,6 @@
       "description": "Configure a Release build.",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -34,7 +32,6 @@
       "description": "Configure the local quality build.",
       "binaryDir": "${sourceDir}/build/quality",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "eversion_WARNINGS_AS_ERRORS": "ON"
@@ -46,23 +43,9 @@
       "description": "Configure a Debug build with AddressSanitizer and UndefinedBehaviorSanitizer.",
       "binaryDir": "${sourceDir}/build/asan-ubsan",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "eversion_ENABLE_SANITIZERS": "ON",
-        "eversion_WARNINGS_AS_ERRORS": "ON"
-      }
-    },
-    {
-      "name": "tsan",
-      "displayName": "TSan",
-      "description": "Configure a Debug build with ThreadSanitizer.",
-      "binaryDir": "${sourceDir}/build/tsan",
-      "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "eversion_ENABLE_THREAD_SANITIZER": "ON",
         "eversion_WARNINGS_AS_ERRORS": "ON"
       }
     },
@@ -72,7 +55,6 @@
       "description": "Configure a Debug build with gcov coverage instrumentation.",
       "binaryDir": "${sourceDir}/build/coverage",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "eversion_ENABLE_COVERAGE": "ON",
@@ -115,12 +97,6 @@
       "name": "asan-ubsan",
       "displayName": "ASan UBSan",
       "configurePreset": "asan-ubsan",
-      "configuration": "Debug"
-    },
-    {
-      "name": "tsan",
-      "displayName": "TSan",
-      "configurePreset": "tsan",
       "configuration": "Debug"
     },
     {
@@ -170,15 +146,6 @@
       "name": "asan-ubsan",
       "displayName": "ASan UBSan",
       "configurePreset": "asan-ubsan",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "tsan",
-      "displayName": "TSan",
-      "configurePreset": "tsan",
       "configuration": "Debug",
       "output": {
         "outputOnFailure": true

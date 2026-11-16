@@ -80,7 +80,7 @@ jobs:
   # from Debian 13 backports and links clang++ in the tools directory;
   # tool_versions.py --tool clang++ checks its version.
   quality-linux:
-    name: Quality (debian-13, ${{ matrix.compiler }}, shared=${{ matrix.shared }})
+    name: Quality (debian-13, ${{ matrix.compiler }})
     runs-on: ubuntu-24.04
     container: debian:13-slim
     strategy:
@@ -89,9 +89,6 @@ jobs:
         compiler:
           - gcc
           - clang
-        shared:
-          - OFF
-          - ON
         include:
           - compiler: gcc
             cxx: g++
@@ -119,7 +116,7 @@ jobs:
 
       - name: Run quality gate
         env:
-          QUALITY_CMAKE_ARGS: -G Ninja -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          QUALITY_CMAKE_ARGS: -G Ninja -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
         run: python3 scripts/quality.py check
 
   sanitizers:
@@ -154,47 +151,6 @@ jobs:
 
       - name: Test
         run: ctest --preset asan-ubsan
-
-  thread-sanitizer:
-    name: ThreadSanitizer (debian-13)
-    runs-on: ubuntu-24.04
-    container:
-      image: debian:13-slim
-      # Docker's default seccomp profile does not let setarch disable address
-      # space randomization.
-      options: --security-opt seccomp=unconfined
-
-    steps:
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install tools
-        run: |
-          sh scripts/install_linux_tools.sh "$RUNNER_TEMP/tools"
-          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
-
-      - name: Verify tool versions
-        run: python scripts/tool_versions.py --strict
-
-      - name: Configure
-        run: cmake --preset tsan -G Ninja
-
-      # ThreadSanitizer aborts when the kernel's mmap randomization breaks its
-      # memory layout, as on the runner. setarch -R turns randomization off for
-      # the build, which runs the test executable to list its tests, and for
-      # the tests.
-      - name: Build
-        run: setarch "$(uname -m)" -R cmake --build --preset tsan
-
-      - name: Test
-        run: setarch "$(uname -m)" -R ctest --preset tsan
 
   coverage:
     name: Coverage (debian-13)

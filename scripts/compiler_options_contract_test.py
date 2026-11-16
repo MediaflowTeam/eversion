@@ -216,7 +216,6 @@ class CompilerOptionsContractTest(unittest.TestCase):
     def test_sanitizers_apply_to_gnu_style_compilers(self) -> None:
         cases = {
             "ENABLE_SANITIZERS": "-fsanitize=address,undefined",
-            "ENABLE_THREAD_SANITIZER": "-fsanitize=thread",
         }
         for option, flag in cases.items():
             for compiler_name, compiler in GNU_STYLE_COMPILERS.items():
@@ -230,17 +229,6 @@ class CompilerOptionsContractTest(unittest.TestCase):
                         self.assertIn(flag, result.compile_options)
                         self.assertIn("-fno-omit-frame-pointer", result.compile_options)
                         self.assertIn(flag, result.link_options)
-
-    def test_thread_sanitizer_cannot_be_combined_with_address_sanitizer(self) -> None:
-        result = self.probe(
-            CONFIGURE_FUNCTIONS[0],
-            GNU_STYLE_COMPILERS["GCC"],
-            ENABLE_SANITIZERS="ON",
-            ENABLE_THREAD_SANITIZER="ON",
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot both be ON", result.stderr)
 
     def test_example_gets_the_library_warning_options(self) -> None:
         # The example cannot use the library's CMake modules, so it repeats

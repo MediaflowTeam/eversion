@@ -25,17 +25,12 @@ tests, verifies the installed CMake package, and runs `clang-tidy`. Use `python`
 instead of `python3` where that is the Python 3 executable. See
 [scripts/README.md](scripts/README.md) for the individual commands.
 
-For changes that affect memory safety or concurrency, also run the sanitizer
-presets:
+For changes that affect memory safety, also run the sanitizer preset:
 
 ```sh
 cmake --preset asan-ubsan
 cmake --build --preset asan-ubsan
 ctest --preset asan-ubsan
-
-cmake --preset tsan
-cmake --build --preset tsan
-ctest --preset tsan
 ```
 
 For changes to public headers, also check that the API documentation builds

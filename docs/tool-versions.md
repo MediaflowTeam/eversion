@@ -170,13 +170,6 @@ cannot be shared between the host and the container.
 The script can also set up another Linux image for this repository, for
 example as a `RUN` step in a Dockerfile.
 
-ThreadSanitizer aborts when the kernel's mmap randomization breaks its memory
-layout. The CI job therefore runs the `tsan` build and tests under
-`setarch "$(uname -m)" -R`, which turns randomization off for those processes.
-Docker's default seccomp profile blocks this, so the container is started with
-`--security-opt seccomp=unconfined`; add that option to `docker run` to run
-the `tsan` preset locally.
-
 ## Change a Recommendation
 
 1. Update `scripts/tool-requirements.txt` and this page. For LLVM, the CI

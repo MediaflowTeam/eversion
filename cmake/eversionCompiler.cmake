@@ -45,18 +45,6 @@ function(eversion_configure_cxx_target target)
     )
   endif()
 
-  if(${PROJECT_NAME}_ENABLE_THREAD_SANITIZER)
-    target_compile_options(${target}
-      PRIVATE
-        -fsanitize=thread
-        -fno-omit-frame-pointer
-    )
-    target_link_options(${target}
-      PRIVATE
-        -fsanitize=thread
-    )
-  endif()
-
   # Coverage instrumentation uses the same GNU-style compilers as the sanitizers.
   if(${PROJECT_NAME}_ENABLE_COVERAGE)
     target_compile_options(${target}
@@ -104,18 +92,6 @@ function(eversion_configure_cxx_interface_target target)
     target_link_options(${target}
       INTERFACE
         $<BUILD_INTERFACE:-fsanitize=address,undefined>
-    )
-  endif()
-
-  if(${PROJECT_NAME}_ENABLE_THREAD_SANITIZER)
-    target_compile_options(${target}
-      INTERFACE
-        $<BUILD_INTERFACE:-fsanitize=thread>
-        $<BUILD_INTERFACE:-fno-omit-frame-pointer>
-    )
-    target_link_options(${target}
-      INTERFACE
-        $<BUILD_INTERFACE:-fsanitize=thread>
     )
   endif()
 

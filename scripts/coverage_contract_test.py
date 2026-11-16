@@ -91,7 +91,6 @@ class CoverageContractTest(unittest.TestCase):
         self.assertEqual(
             coverage.get("cacheVariables"),
             {
-                "BUILD_SHARED_LIBS": "OFF",
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "eversion_ENABLE_COVERAGE": "ON",
