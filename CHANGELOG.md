@@ -15,6 +15,11 @@ the last state of the earlier one.
 
 ### Changed
 
+- Generated files record the `CMakeLists.txt` that declared them as the project
+  name and a path relative to the project root, such as
+  `Source: eversion/CMakeLists.txt`, instead of an absolute path on the build
+  machine. Installed headers are now identical whichever directory the source
+  is built in, and no longer reveal the build machine's directory layout.
 - `Version::ToString()` and `RuntimeVersion::ToString()` are `constexpr`, so
   `static_assert(version.ToString() == "1.2.3")` compiles. The output is
   unchanged.

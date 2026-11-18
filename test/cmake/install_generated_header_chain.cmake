@@ -49,6 +49,30 @@ function(_eversion_check_configure_cache description build_dir)
   endif()
 endfunction()
 
+function(_eversion_expect_file_line file_path expected_line)
+  file(STRINGS "${file_path}" lines)
+  foreach(line IN LISTS lines)
+    string(REGEX REPLACE "\r$" "" line "${line}")
+    if(line STREQUAL expected_line)
+      return()
+    endif()
+  endforeach()
+  message(FATAL_ERROR
+    "expected line '${expected_line}' was not found in '${file_path}'")
+endfunction()
+
+function(_eversion_expect_one_file description glob_expression output_variable)
+  file(GLOB_RECURSE matched_files "${glob_expression}")
+  list(LENGTH matched_files matched_file_count)
+  if(NOT matched_file_count EQUAL 1)
+    message(FATAL_ERROR
+      "${description}: expected exactly one file matching "
+      "'${glob_expression}', found ${matched_file_count}: ${matched_files}")
+  endif()
+  list(GET matched_files 0 matched_file)
+  set("${output_variable}" "${matched_file}" PARENT_SCOPE)
+endfunction()
+
 function(_eversion_contract_run description)
   execute_process(
     COMMAND ${ARGN}
@@ -83,6 +107,34 @@ _eversion_contract_run("build producer"
 
 _eversion_contract_run("install producer"
   "${CMAKE_COMMAND}" --install "${producer_build}")
+
+_eversion_expect_one_file("producer installed generated header"
+  "${producer_prefix}/*/producer/version_info.h" producer_installed_header)
+_eversion_expect_file_line("${producer_installed_header}"
+  " * Source: eversion_install_producer/CMakeLists.txt")
+file(READ "${producer_installed_header}" producer_header_contents)
+foreach(forbidden_text IN ITEMS "${EVERSION_SOURCE_DIR}" "${work_dir}")
+  string(FIND "${producer_header_contents}" "${forbidden_text}"
+    forbidden_position)
+  if(NOT forbidden_position EQUAL -1)
+    message(FATAL_ERROR
+      "producer installed generated header '${producer_installed_header}' "
+      "contains build-machine path '${forbidden_text}'")
+  endif()
+endforeach()
+
+_eversion_expect_one_file("eversion installed generated header"
+  "${eversion_prefix}/*/eversion/version_info.h" eversion_installed_header)
+_eversion_expect_file_line("${eversion_installed_header}"
+  " * Source: eversion/CMakeLists.txt")
+file(READ "${eversion_installed_header}" eversion_header_contents)
+string(FIND "${eversion_header_contents}" "${EVERSION_SOURCE_DIR}"
+  eversion_source_dir_position)
+if(NOT eversion_source_dir_position EQUAL -1)
+  message(FATAL_ERROR
+    "eversion installed generated header '${eversion_installed_header}' "
+    "contains build-machine path '${EVERSION_SOURCE_DIR}'")
+endif()
 
 set(prefix_path "${producer_prefix};${eversion_prefix}")
 string(REPLACE ";" "\;" prefix_path_arg "${prefix_path}")

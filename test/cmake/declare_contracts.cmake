@@ -44,6 +44,33 @@ function(_eversion_join_body output_var)
   set("${output_var}" "${body}" PARENT_SCOPE)
 endfunction()
 
+function(_eversion_expect_file_line file_path expected_line)
+  file(STRINGS "${file_path}" lines)
+  foreach(line IN LISTS lines)
+    string(REGEX REPLACE "\r$" "" line "${line}")
+    if(line STREQUAL expected_line)
+      return()
+    endif()
+  endforeach()
+  message(FATAL_ERROR
+    "expected line '${expected_line}' was not found in '${file_path}'")
+endfunction()
+
+function(_eversion_expect_generated_source_line case_name glob_expression
+  expected_line)
+  file(GLOB_RECURSE generated_files
+    "${${case_name}_build_dir}/${glob_expression}")
+  list(LENGTH generated_files generated_file_count)
+  if(NOT generated_file_count EQUAL 1)
+    message(FATAL_ERROR
+      "${case_name}: expected exactly one generated file matching "
+      "'${glob_expression}' under '${${case_name}_build_dir}', found "
+      "${generated_file_count}: ${generated_files}")
+  endif()
+  list(GET generated_files 0 generated_file)
+  _eversion_expect_file_line("${generated_file}" "${expected_line}")
+endfunction()
+
 function(_eversion_expect_configure_failure case_name)
   _eversion_expect_configure_failure_containing("${case_name}" "" ${ARGN})
 endfunction()
@@ -101,6 +128,9 @@ function(_eversion_expect_configure_success case_name)
       "stdout:\n${output}\n"
       "stderr:\n${error}")
   endif()
+
+  set("${case_name}_source_dir" "${${case_name}_source_dir}" PARENT_SCOPE)
+  set("${case_name}_build_dir" "${${case_name}_build_dir}" PARENT_SCOPE)
 endfunction()
 
 _eversion_expect_configure_failure_containing("duplicate_namespace"
@@ -190,3 +220,30 @@ file(WRITE "${plugin_overflow_case_dir}/plugin_overflow.cpp" "")
 _eversion_expect_configure_failure("plugin_version_overflow"
 "add_library(plugin_overflow MODULE plugin_overflow.cpp)\n"
 "eversion_declare_plugin(plugin_overflow ID test.plugin NAME \"Test Plugin\" NAMESPACE plugin_overflow::version_info MAJOR 0 MINOR 4294967296 PATCH 0 OUTPUT plugin_overflow/version_info.h NO_INSTALL)\n")
+
+set(subdirectory_case_name "source_line_from_subdirectory")
+set(subdirectory_case_dir "${work_dir}/${subdirectory_case_name}")
+file(MAKE_DIRECTORY "${subdirectory_case_dir}/core")
+file(WRITE "${subdirectory_case_dir}/core/CMakeLists.txt"
+"add_library(core_version_info INTERFACE)\n"
+"eversion_declare(core_version_info NAMESPACE source_line_from_subdirectory::core_version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT core/version_info.h NO_INSTALL)\n")
+_eversion_expect_configure_success("${subdirectory_case_name}"
+"add_subdirectory(core)\n")
+_eversion_expect_generated_source_line("${subdirectory_case_name}"
+  "core/eversion_generated/*/include/*/version_info.h"
+  " * Source: source_line_from_subdirectory/core/CMakeLists.txt")
+_eversion_expect_generated_source_line("${subdirectory_case_name}"
+  "eversion/eversion_generated/*/include/eversion/version_info.h"
+  " * Source: eversion/CMakeLists.txt")
+
+set(outside_case_name "source_line_outside_project")
+set(outside_file_dir "${work_dir}/outside")
+file(MAKE_DIRECTORY "${outside_file_dir}")
+file(WRITE "${outside_file_dir}/declare.cmake"
+"add_library(outside_version_info INTERFACE)\n"
+"eversion_declare(outside_version_info NAMESPACE source_line_outside_project::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT outside/version_info.h NO_INSTALL)\n")
+_eversion_expect_configure_success("${outside_case_name}"
+"include(\"${outside_file_dir}/declare.cmake\")\n")
+_eversion_expect_generated_source_line("${outside_case_name}"
+  "eversion_generated/*/include/outside/version_info.h"
+  " * Source: declare.cmake")

@@ -612,6 +612,15 @@ Installing EVersion installs:
 EVersion is header-only: the install tree contains no library binary, and does
 not expose source-tree-only include directories.
 
+The install tree does not depend on where the source was built. A generated
+header records the file that declared it as the project name and a path relative
+to the project root, such as `Source: eversion/CMakeLists.txt`, not as an
+absolute path on the build machine, so the same source installs byte-for-byte
+identical files from any directory. The same holds for headers that your own
+project generates with `eversion_declare()`. When the declaring file is outside
+the project root, for example a `.cmake` file included from elsewhere, only its
+file name is recorded.
+
 The package version file uses `SameMinorVersion`: only patch releases are
 compatible, before and after 1.0. `find_package(eversion 0.1)` accepts 0.1.x
 releases, and rejects 0.2 and 1.0. EVersion's inline functions and the code

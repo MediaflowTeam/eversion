@@ -79,6 +79,31 @@ function(_eversion_normalize_relative_path target_name argument_name path_value
   set("${output_variable}" "${normalized_path}" PARENT_SCOPE)
 endfunction()
 
+function(_eversion_describe_declaring_file output_variable)
+  set(declaring_file "${CMAKE_CURRENT_LIST_FILE}")
+  set(project_root "${PROJECT_SOURCE_DIR}")
+  set(project_name "${PROJECT_NAME}")
+
+  cmake_path(RELATIVE_PATH declaring_file
+    BASE_DIRECTORY "${project_root}"
+    OUTPUT_VARIABLE declaring_file_relative_to_project)
+
+  set(declaring_file_is_outside_project FALSE)
+  if(declaring_file_relative_to_project MATCHES "^\\.\\./")
+    set(declaring_file_is_outside_project TRUE)
+  endif()
+
+  if(declaring_file_is_outside_project)
+    cmake_path(GET declaring_file FILENAME declaring_file_name)
+    set(description "${declaring_file_name}")
+  else()
+    set(description
+      "${project_name}/${declaring_file_relative_to_project}")
+  endif()
+
+  set("${output_variable}" "${description}" PARENT_SCOPE)
+endfunction()
+
 function(_eversion_normalize_version_number target_name argument_name
   number_value output_variable)
   if(NOT number_value MATCHES "^[0-9]+$")
@@ -353,7 +378,7 @@ function(eversion_declare target_name)
       "std::string_view{\"${EV_BUILD_METADATA}\"}")
   endif()
   set(EVERSION_VERSION_STRING "${version_string}")
-  set(EVERSION_DECLARE_CALLER "${CMAKE_CURRENT_LIST_FILE}")
+  _eversion_describe_declaring_file(EVERSION_DECLARE_CALLER)
 
   configure_file("${EV_TEMPLATE}" "${output_file}" @ONLY)
 
@@ -549,7 +574,7 @@ function(eversion_declare_plugin target_name)
   else()
     set(EVERSION_BUILD_METADATA "")
   endif()
-  set(EVERSION_DECLARE_CALLER "${CMAKE_CURRENT_LIST_FILE}")
+  _eversion_describe_declaring_file(EVERSION_DECLARE_CALLER)
 
   set(EVERSION_PLUGIN_EXPORT
     "__attribute__((visibility(\"default\")))")
