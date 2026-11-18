@@ -9,10 +9,11 @@
 #define EVERSION_COMPONENT_INFO_H_
 
 #include <eversion/detail/component_info_strings.h>
-#include <eversion/version.h>
+#include <eversion/runtime_version.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace eversion {
@@ -26,8 +27,16 @@ inline constexpr std::string_view kPluginInfoSymbol = "eversion_plugin_info";
  * @brief ABI-stable component version representation for dynamic-library
  * boundaries.
  *
- * This type avoids C++ library types at the plugin boundary. Convert it to
- * `eversion::Version` with `ToVersion()` after validation.
+ * This type avoids C++ library types at the plugin boundary. Copy it into an
+ * `eversion::RuntimeVersion` with `ToRuntimeVersion()` after validation.
+ *
+ * This type is fixed to the five SemVer 2.0.0 parts and will not gain fields.
+ * Channels, build numbers, commit identifiers, and dates belong in
+ * `prerelease` or `build_metadata`; component metadata that is not part of the
+ * version is appended to the end of `ComponentInfo` instead. `ComponentVersion`
+ * is embedded by value in `ComponentInfo`, so its size contributes to
+ * `kComponentInfoRequiredSize`; changing it would shift every field appended
+ * after it and make a new host reject all existing plugins.
  */
 struct ComponentVersion {
   /** @brief Major version component. */
@@ -47,6 +56,9 @@ struct ComponentVersion {
  *
  * Fields may only be appended to the end of this structure within the same ABI
  * version. Consumers must use `struct_size` to guard reads of appended fields.
+ *
+ * This layout is stable only between a host and a plugin built for the same
+ * architecture, with the same pointer width and alignment.
  */
 struct ComponentInfo {
   /** @brief Component metadata ABI version. */
@@ -78,25 +90,25 @@ inline constexpr std::size_t kComponentInfoRequiredSize =
 using ComponentInfoFunction = const ComponentInfo* (*)() noexcept;
 
 /**
- * @brief Converts an ABI-stable component version to `eversion::Version`.
+ * @brief Copies an ABI-stable component version into an owning runtime
+ * version.
  *
- * Null string pointers are treated as empty strings.
+ * Null string pointers are treated as empty strings. The result owns copies of
+ * the strings, so it stays valid after the plugin library is unloaded.
  *
- * @warning The returned `Version` contains string views into @p version. When
- * @p version came from a dynamic plugin, the returned value must not outlive
- * the plugin library or the storage backing the plugin's `const char*` fields.
- *
- * @param version Component version metadata to convert.
- * @return A non-owning EVersion view.
+ * @param version Component version metadata to copy.
+ * @return A runtime version that owns copies of the prerelease and build
+ * metadata strings.
  */
-[[nodiscard]] constexpr Version ToVersion(
-    const ComponentVersion& version) noexcept {
-  return Version{
+[[nodiscard]] inline RuntimeVersion ToRuntimeVersion(
+    const ComponentVersion& version) {
+  return RuntimeVersion{
       .major = version.major,
       .minor = version.minor,
       .patch = version.patch,
-      .prerelease = detail::StringViewOrEmpty(version.prerelease),
-      .build_metadata = detail::StringViewOrEmpty(version.build_metadata),
+      .prerelease = std::string{detail::StringViewOrEmpty(version.prerelease)},
+      .build_metadata =
+          std::string{detail::StringViewOrEmpty(version.build_metadata)},
   };
 }
 

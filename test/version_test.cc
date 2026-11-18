@@ -43,15 +43,21 @@ template <typename T>
 concept CanCallAsVersion = requires { std::declval<T>().AsVersion(); };
 
 template <typename T>
+concept CanCallView = requires { std::declval<T>().View(); };
+
+template <typename T>
 concept HasFreeToString = requires(const T& value) { ToString(value); };
 
 static_assert(!HasFreeToString<eversion::Version>);
 static_assert(!HasFreeToString<eversion::RuntimeVersion>);
 
-static_assert(CanCallAsVersion<eversion::RuntimeVersion&>);
-static_assert(CanCallAsVersion<const eversion::RuntimeVersion&>);
+static_assert(!CanCallAsVersion<eversion::RuntimeVersion&>);
+static_assert(!CanCallAsVersion<const eversion::RuntimeVersion&>);
 static_assert(!CanCallAsVersion<eversion::RuntimeVersion>);
 static_assert(!CanCallAsVersion<const eversion::RuntimeVersion>);
+
+static_assert(!CanCallView<eversion::RuntimeVersion&>);
+static_assert(!CanCallView<const eversion::RuntimeVersion&>);
 
 static_assert(std::is_aggregate_v<eversion::Version>);
 static_assert(std::is_aggregate_v<eversion::RuntimeVersion>);
@@ -129,7 +135,7 @@ TEST(Version, ToStringFormatsEachOptionalPart) {
   EXPECT_EQ(V(0, 0, 4294967295U).ToString(), "0.0.4294967295");
 }
 
-TEST(Version, RuntimeVersionOwnsStringsAndExposesVersionView) {
+TEST(Version, RuntimeVersionOwnsStrings) {
   eversion::RuntimeVersion owned{
       .major = 1,
       .minor = 2,
@@ -138,9 +144,6 @@ TEST(Version, RuntimeVersionOwnsStringsAndExposesVersionView) {
       .build_metadata = "git.deadbeef",
   };
 
-  const eversion::Version view = owned.AsVersion();
-  EXPECT_EQ(view.prerelease.data(), owned.prerelease.data());
-  EXPECT_EQ(view.build_metadata.data(), owned.build_metadata.data());
   EXPECT_TRUE(owned.HasPrerelease());
   EXPECT_TRUE(owned.HasBuildMetadata());
   EXPECT_FALSE(owned.IsStable());
@@ -179,22 +182,23 @@ TEST(Version, ToRuntimeVersionOwnsCopiesOfTheViewedStrings) {
   EXPECT_EQ(owned.build_metadata, "git.deadbeef");
 }
 
-TEST(Version, ToRuntimeVersionRoundTripsThroughAsVersion) {
-  const eversion::RuntimeVersion owned{
-      .major = 1,
-      .minor = 2,
-      .patch = 3,
-      .prerelease = "rc.1",
-      .build_metadata = "git.deadbeef",
-  };
+TEST(Version, ToRuntimeVersionComparesEqualToItsSource) {
+  const eversion::Version full = V(1, 2, 3, "rc.1", "git.deadbeef");
+  const eversion::RuntimeVersion full_owned = eversion::ToRuntimeVersion(full);
+  EXPECT_EQ(full_owned, full);
+  EXPECT_EQ(full_owned.ToString(), full.ToString());
 
-  const eversion::RuntimeVersion round_tripped =
-      eversion::ToRuntimeVersion(owned.AsVersion());
-  EXPECT_EQ(round_tripped.major, owned.major);
-  EXPECT_EQ(round_tripped.minor, owned.minor);
-  EXPECT_EQ(round_tripped.patch, owned.patch);
-  EXPECT_EQ(round_tripped.prerelease, owned.prerelease);
-  EXPECT_EQ(round_tripped.build_metadata, owned.build_metadata);
+  const eversion::Version stable = V(0, 0, 1);
+  const eversion::RuntimeVersion stable_owned =
+      eversion::ToRuntimeVersion(stable);
+  EXPECT_EQ(stable_owned, stable);
+  EXPECT_EQ(stable_owned.ToString(), stable.ToString());
+
+  const eversion::Version alpha = V(2, 0, 0, "alpha.1");
+  const eversion::RuntimeVersion alpha_owned =
+      eversion::ToRuntimeVersion(alpha);
+  EXPECT_EQ(alpha_owned, alpha);
+  EXPECT_EQ(alpha_owned.ToString(), alpha.ToString());
 }
 
 TEST(Version, RuntimeVersionComparesByPrecedence) {
@@ -277,9 +281,7 @@ TEST(Version, LeadingZerosAreReadAsNumbers) {
   EXPECT_EQ(prerelease_leading_zeros.prerelease, "rc.007");
   EXPECT_EQ(prerelease_leading_zeros.ToString(), "1.2.3-rc.007");
 
-  const eversion::Version prerelease_view =
-      prerelease_leading_zeros.AsVersion();
-  EXPECT_EQ(prerelease_view, V(1, 2, 3, "rc.7"));
+  EXPECT_EQ(prerelease_leading_zeros, V(1, 2, 3, "rc.7"));
 }
 
 TEST(Version, TryParseVersionRejectsInvalidForms) {

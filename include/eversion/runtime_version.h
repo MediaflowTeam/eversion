@@ -23,11 +23,10 @@ namespace eversion {
 /**
  * @brief Owning version value for parsed or otherwise runtime-owned metadata.
  *
- * Use `AsVersion()` when APIs need the lightweight non-owning `Version` view.
- * The returned view remains valid until this object is modified or destroyed.
- * Calling it on an rvalue `RuntimeVersion` is ill-formed. A temporary reached
- * through a pointer, as in `TryParseVersion(text)->AsVersion()`, is not
- * detected; store the parsed value in a variable before taking a view.
+ * `RuntimeVersion` owns its strings and does not hand out `Version` views, so
+ * a stored value cannot dangle. Compare it directly with another
+ * `RuntimeVersion` or with a `Version`; use `ToRuntimeVersion()` to copy a
+ * `Version` into one.
  */
 struct RuntimeVersion {
   /** @brief Major version component. */
@@ -41,29 +40,8 @@ struct RuntimeVersion {
   /** @brief Optional build metadata without the leading plus sign. */
   std::string build_metadata;
 
-  /** @brief Returns a non-owning view of this runtime version. */
-  [[nodiscard]] Version AsVersion() const& noexcept {
-    return Version{
-        .major = major,
-        .minor = minor,
-        .patch = patch,
-        .prerelease = prerelease,
-        .build_metadata = build_metadata,
-    };
-  }
-
-  /**
-   * @brief Deleted overload that would return a view into an rvalue.
-   *
-   * The returned view would point at strings destroyed at the end of the full
-   * expression, so calling this on an rvalue `RuntimeVersion` is ill-formed.
-   */
-  [[nodiscard]] Version AsVersion() const&& = delete;
-
   /** @brief Returns whether this version represents a stable release. */
-  [[nodiscard]] bool IsStable() const noexcept {
-    return AsVersion().IsStable();
-  }
+  [[nodiscard]] bool IsStable() const noexcept { return View().IsStable(); }
 
   /** @brief Returns whether the version has prerelease metadata. */
   [[nodiscard]] bool HasPrerelease() const noexcept {
@@ -76,7 +54,7 @@ struct RuntimeVersion {
   }
 
   /** @brief Formats this version as a canonical string. */
-  [[nodiscard]] std::string ToString() const { return AsVersion().ToString(); }
+  [[nodiscard]] std::string ToString() const { return View().ToString(); }
 
   /**
    * @brief Compares this runtime version with @p other by release precedence.
@@ -87,7 +65,7 @@ struct RuntimeVersion {
    */
   [[nodiscard]] std::weak_ordering operator<=>(
       const RuntimeVersion& other) const noexcept {
-    return AsVersion() <=> other.AsVersion();
+    return View() <=> other.View();
   }
 
   /**
@@ -99,7 +77,7 @@ struct RuntimeVersion {
    * @param other Runtime version to compare with.
    */
   [[nodiscard]] bool operator==(const RuntimeVersion& other) const noexcept {
-    return AsVersion() == other.AsVersion();
+    return View() == other.View();
   }
 
   /**
@@ -112,7 +90,7 @@ struct RuntimeVersion {
    */
   [[nodiscard]] std::weak_ordering operator<=>(
       const Version& other) const noexcept {
-    return AsVersion() <=> other;
+    return View() <=> other;
   }
 
   /**
@@ -125,16 +103,27 @@ struct RuntimeVersion {
    * @param other Version to compare with.
    */
   [[nodiscard]] bool operator==(const Version& other) const noexcept {
-    return AsVersion() == other;
+    return View() == other;
+  }
+
+ private:
+  // Builds a view of this object for the comparisons and formatting above.
+  // The view must not outlive the full expression that uses it.
+  [[nodiscard]] Version View() const noexcept {
+    return Version{
+        .major = major,
+        .minor = minor,
+        .patch = patch,
+        .prerelease = prerelease,
+        .build_metadata = build_metadata,
+    };
   }
 };
 
 /**
  * @brief Copies a version view into an owning runtime version.
  *
- * Use this to keep a `Version` beyond the lifetime of the storage it views,
- * such as a view returned by `ToVersion()` for a dynamic plugin that may be
- * unloaded later.
+ * Use this to keep a `Version` beyond the lifetime of the storage it views.
  *
  * @param version Version view to copy.
  * @return A runtime version that owns copies of the prerelease and build

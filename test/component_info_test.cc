@@ -6,12 +6,18 @@
  */
 
 #include <eversion/component_info.h>
+#include <eversion/runtime_version.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <type_traits>
 
 namespace {
+
+template <typename T>
+concept HasToVersion = requires(const T& value) { ToVersion(value); };
+
+static_assert(!HasToVersion<eversion::ComponentVersion>);
 
 constexpr eversion::ComponentVersion kComponentVersion{
     .major = 3,
@@ -35,16 +41,23 @@ struct ExtendedComponentInfo {
   const char* license = "";
 };
 
-TEST(ComponentInfo, ToVersionConvertsFields) {
-  const eversion::Version version = eversion::ToVersion(kComponentVersion);
+TEST(ComponentInfo, ToRuntimeVersionCopiesFields) {
+  const eversion::RuntimeVersion version =
+      eversion::ToRuntimeVersion(kComponentVersion);
   EXPECT_EQ(version.major, 3U);
   EXPECT_EQ(version.minor, 4U);
   EXPECT_EQ(version.patch, 5U);
   EXPECT_EQ(version.prerelease, "rc.1");
   EXPECT_EQ(version.build_metadata, "git.abc");
+  EXPECT_NE(version.prerelease.data(), kComponentVersion.prerelease);
+  EXPECT_EQ(version, (eversion::Version{.major = 3,
+                                        .minor = 4,
+                                        .patch = 5,
+                                        .prerelease = "rc.1",
+                                        .build_metadata = "git.abc"}));
 }
 
-TEST(ComponentInfo, ToVersionTreatsNullStringsAsEmptyViews) {
+TEST(ComponentInfo, ToRuntimeVersionTreatsNullStringsAsEmpty) {
   constexpr eversion::ComponentVersion kNullStrings{
       .major = 1,
       .minor = 2,
@@ -53,7 +66,8 @@ TEST(ComponentInfo, ToVersionTreatsNullStringsAsEmptyViews) {
       .build_metadata = nullptr,
   };
 
-  const eversion::Version version = eversion::ToVersion(kNullStrings);
+  const eversion::RuntimeVersion version =
+      eversion::ToRuntimeVersion(kNullStrings);
   EXPECT_EQ(version.major, 1U);
   EXPECT_EQ(version.minor, 2U);
   EXPECT_EQ(version.patch, 3U);
@@ -139,16 +153,66 @@ TEST(ComponentInfo, FieldAvailabilityUsesStructSize) {
 
 static_assert(std::is_same_v<decltype(eversion::ComponentInfo{}.version),
                              eversion::ComponentVersion>);
-static_assert(eversion::ToVersion(kComponentVersion) ==
-              eversion::Version{.major = 3,
-                                .minor = 4,
-                                .patch = 5,
-                                .prerelease = "rc.1",
-                                .build_metadata = "other.build"});
 static_assert(eversion::IsValidComponentInfo(&kComponentInfo));
 static_assert(!eversion::IsValidComponentInfo(nullptr));
 static_assert(eversion::IsComponentInfoFieldAvailable(
     &kComponentInfo, offsetof(eversion::ComponentInfo, version),
     sizeof(eversion::ComponentVersion)));
+
+static_assert(std::is_standard_layout_v<eversion::ComponentVersion>,
+              "ComponentVersion must be standard layout for the fixed ABI v1 "
+              "layout; see README 'Runtime Metadata ABI'");
+static_assert(std::is_standard_layout_v<eversion::ComponentInfo>,
+              "ComponentInfo must be standard layout for the fixed ABI v1 "
+              "layout; see README 'Runtime Metadata ABI'");
+
+constexpr bool kIsLp64 = sizeof(void*) == 8U && sizeof(std::size_t) == 8U;
+
+static_assert(
+    !kIsLp64 || offsetof(eversion::ComponentVersion, major) == 0U,
+    "ComponentVersion::major is at offset 0 in the fixed ABI v1 layout; see "
+    "README 'Runtime Metadata ABI'");
+static_assert(
+    !kIsLp64 || offsetof(eversion::ComponentVersion, minor) == 4U,
+    "ComponentVersion::minor is at offset 4 in the fixed ABI v1 layout; see "
+    "README 'Runtime Metadata ABI'");
+static_assert(
+    !kIsLp64 || offsetof(eversion::ComponentVersion, patch) == 8U,
+    "ComponentVersion::patch is at offset 8 in the fixed ABI v1 layout; see "
+    "README 'Runtime Metadata ABI'");
+static_assert(
+    !kIsLp64 || offsetof(eversion::ComponentVersion, prerelease) == 16U,
+    "ComponentVersion::prerelease is at offset 16 in the fixed ABI v1 layout; "
+    "see README 'Runtime Metadata ABI'");
+static_assert(
+    !kIsLp64 || offsetof(eversion::ComponentVersion, build_metadata) == 24U,
+    "ComponentVersion::build_metadata is at offset 24 in the fixed ABI v1 "
+    "layout; see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || sizeof(eversion::ComponentVersion) == 32U,
+              "ComponentVersion is 32 bytes in the fixed ABI v1 layout; see "
+              "README 'Runtime Metadata ABI'");
+
+static_assert(!kIsLp64 || offsetof(eversion::ComponentInfo, abi_version) == 0U,
+              "ComponentInfo::abi_version is at offset 0 in the fixed ABI v1 "
+              "layout; see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || offsetof(eversion::ComponentInfo, struct_size) == 8U,
+              "ComponentInfo::struct_size is at offset 8 in the fixed ABI v1 "
+              "layout; see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || offsetof(eversion::ComponentInfo, id) == 16U,
+              "ComponentInfo::id is at offset 16 in the fixed ABI v1 layout; "
+              "see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || offsetof(eversion::ComponentInfo, name) == 24U,
+              "ComponentInfo::name is at offset 24 in the fixed ABI v1 layout; "
+              "see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || offsetof(eversion::ComponentInfo, version) == 32U,
+              "ComponentInfo::version is at offset 32 in the fixed ABI v1 "
+              "layout; see README 'Runtime Metadata ABI'");
+static_assert(!kIsLp64 || sizeof(eversion::ComponentInfo) == 64U,
+              "ComponentInfo is 64 bytes in the fixed ABI v1 layout; see "
+              "README 'Runtime Metadata ABI'");
+static_assert(
+    !kIsLp64 || eversion::kComponentInfoRequiredSize == 64U,
+    "kComponentInfoRequiredSize is 64 in the fixed ABI v1 layout; see README "
+    "'Runtime Metadata ABI'");
 
 }  // namespace

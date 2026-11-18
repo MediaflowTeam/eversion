@@ -7,7 +7,7 @@
 
 #include <dlfcn.h>
 #include <eversion/component_info.h>
-#include <eversion/version.h>
+#include <eversion/runtime_version.h>
 #include <eversion/version_info.h>
 #include <version_report/version_info.h>
 
@@ -76,12 +76,13 @@ bool PrintPluginInfo(const char* path) {
     return false;
   }
 
-  // ToVersion() views point into plugin storage, so format before dlclose().
-  const std::string version_string =
-      eversion::ToVersion(info->version).ToString();
+  const eversion::RuntimeVersion plugin_version =
+      eversion::ToRuntimeVersion(info->version);
   PrintHostVersions();
+  // info->id and info->name point into the plugin, so print them before the
+  // library is closed.
   std::cout << "plugin " << info->id << " (" << info->name << ") "
-            << version_string << '\n';
+            << plugin_version.ToString() << '\n';
   return true;
 }
 
