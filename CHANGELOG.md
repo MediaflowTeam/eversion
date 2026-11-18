@@ -42,6 +42,13 @@ the last state of the earlier one.
 
 ### Added
 
+- `ToRuntimeVersion()` in `<eversion/runtime_version.h>` copies a `Version`
+  into an owning `RuntimeVersion`, for example to keep a plugin's version after
+  the plugin is unloaded. Before, each field had to be copied by hand.
+- `RuntimeVersion` has `<=>` and `==`, both with another `RuntimeVersion` and
+  with a `Version` on either side. They use the same precedence rules as
+  `Version` and ignore build metadata. Before, both sides had to be converted
+  with `AsVersion()` first.
 - `examples/version_report`, a plugin host built only against the installed
   package and run by `quality.py check`.
 - The `coverage` and `docs` presets, with the `eversion_ENABLE_COVERAGE` and
@@ -81,6 +88,9 @@ the last state of the earlier one.
 
 ### Removed
 
+- The free function `eversion::ToString(const Version&)`. It did the same as
+  the member `Version::ToString()`, which remains; write `version.ToString()`
+  instead.
 - Windows and macOS CI jobs, and the Windows code paths in the CMake functions
   and tests.
 - The `shared` dimension of the CI quality matrix, and `BUILD_SHARED_LIBS` in

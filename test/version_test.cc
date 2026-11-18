@@ -11,6 +11,7 @@
 #include <compare>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -28,13 +29,50 @@ constexpr eversion::Version V(std::uint32_t major, std::uint32_t minor,
                            .build_metadata = build_metadata};
 }
 
+eversion::RuntimeVersion R(std::uint32_t major, std::uint32_t minor,
+                           std::uint32_t patch, std::string prerelease = {},
+                           std::string build_metadata = {}) {
+  return eversion::RuntimeVersion{.major = major,
+                                  .minor = minor,
+                                  .patch = patch,
+                                  .prerelease = std::move(prerelease),
+                                  .build_metadata = std::move(build_metadata)};
+}
+
 template <typename T>
 concept CanCallAsVersion = requires { std::declval<T>().AsVersion(); };
+
+template <typename T>
+concept HasFreeToString = requires(const T& value) { ToString(value); };
+
+static_assert(!HasFreeToString<eversion::Version>);
+static_assert(!HasFreeToString<eversion::RuntimeVersion>);
 
 static_assert(CanCallAsVersion<eversion::RuntimeVersion&>);
 static_assert(CanCallAsVersion<const eversion::RuntimeVersion&>);
 static_assert(!CanCallAsVersion<eversion::RuntimeVersion>);
 static_assert(!CanCallAsVersion<const eversion::RuntimeVersion>);
+
+static_assert(std::is_aggregate_v<eversion::Version>);
+static_assert(std::is_aggregate_v<eversion::RuntimeVersion>);
+static_assert(std::is_same_v<decltype(eversion::ToRuntimeVersion(V(1, 0, 0))),
+                             eversion::RuntimeVersion>);
+static_assert(
+    !std::is_convertible_v<eversion::RuntimeVersion, eversion::Version>);
+static_assert(
+    !std::is_convertible_v<eversion::Version, eversion::RuntimeVersion>);
+static_assert(
+    std::is_same_v<decltype(std::declval<const eversion::RuntimeVersion&>() <=>
+                            std::declval<const eversion::RuntimeVersion&>()),
+                   std::weak_ordering>);
+static_assert(
+    std::is_same_v<decltype(std::declval<const eversion::RuntimeVersion&>() <=>
+                            std::declval<const eversion::Version&>()),
+                   std::weak_ordering>);
+static_assert(
+    std::is_same_v<decltype(std::declval<const eversion::Version&>() <=>
+                            std::declval<const eversion::RuntimeVersion&>()),
+                   std::weak_ordering>);
 
 TEST(Version, EqualityIgnoresBuildMetadata) {
   EXPECT_EQ(V(1, 2, 3), V(1, 2, 3));
@@ -107,6 +145,89 @@ TEST(Version, RuntimeVersionOwnsStringsAndExposesVersionView) {
   EXPECT_TRUE(owned.HasBuildMetadata());
   EXPECT_FALSE(owned.IsStable());
   EXPECT_EQ(owned.ToString(), "1.2.3-rc.1+git.deadbeef");
+}
+
+TEST(Version, ToRuntimeVersionCopiesEveryField) {
+  const eversion::RuntimeVersion owned =
+      eversion::ToRuntimeVersion(V(1, 2, 3, "rc.1", "git.deadbeef"));
+  EXPECT_EQ(owned.major, 1U);
+  EXPECT_EQ(owned.minor, 2U);
+  EXPECT_EQ(owned.patch, 3U);
+  EXPECT_EQ(owned.prerelease, "rc.1");
+  EXPECT_EQ(owned.build_metadata, "git.deadbeef");
+  EXPECT_EQ(owned.ToString(), "1.2.3-rc.1+git.deadbeef");
+
+  const eversion::RuntimeVersion stable =
+      eversion::ToRuntimeVersion(V(1, 0, 0));
+  EXPECT_FALSE(stable.HasPrerelease());
+  EXPECT_FALSE(stable.HasBuildMetadata());
+}
+
+TEST(Version, ToRuntimeVersionOwnsCopiesOfTheViewedStrings) {
+  std::string source_prerelease = "rc.1";
+  std::string source_build_metadata = "git.deadbeef";
+  const eversion::Version view =
+      V(1, 2, 3, source_prerelease, source_build_metadata);
+
+  const eversion::RuntimeVersion owned = eversion::ToRuntimeVersion(view);
+  EXPECT_NE(owned.prerelease.data(), source_prerelease.data());
+  EXPECT_NE(owned.build_metadata.data(), source_build_metadata.data());
+
+  source_prerelease.assign("changed");
+  source_build_metadata.assign("changed");
+  EXPECT_EQ(owned.prerelease, "rc.1");
+  EXPECT_EQ(owned.build_metadata, "git.deadbeef");
+}
+
+TEST(Version, ToRuntimeVersionRoundTripsThroughAsVersion) {
+  const eversion::RuntimeVersion owned{
+      .major = 1,
+      .minor = 2,
+      .patch = 3,
+      .prerelease = "rc.1",
+      .build_metadata = "git.deadbeef",
+  };
+
+  const eversion::RuntimeVersion round_tripped =
+      eversion::ToRuntimeVersion(owned.AsVersion());
+  EXPECT_EQ(round_tripped.major, owned.major);
+  EXPECT_EQ(round_tripped.minor, owned.minor);
+  EXPECT_EQ(round_tripped.patch, owned.patch);
+  EXPECT_EQ(round_tripped.prerelease, owned.prerelease);
+  EXPECT_EQ(round_tripped.build_metadata, owned.build_metadata);
+}
+
+TEST(Version, RuntimeVersionComparesByPrecedence) {
+  EXPECT_LT(R(1, 5, 5), R(2, 5, 5));
+  EXPECT_GT(R(2, 5, 5), R(1, 5, 5));
+  EXPECT_LT(R(1, 2, 5), R(1, 3, 5));
+  EXPECT_GT(R(1, 3, 5), R(1, 2, 5));
+  EXPECT_LT(R(1, 2, 3), R(1, 2, 4));
+  EXPECT_GT(R(1, 2, 4), R(1, 2, 3));
+
+  EXPECT_LT(R(1, 9, 9), R(2, 0, 0));
+  EXPECT_LT(R(1, 1, 9), R(1, 2, 0));
+
+  EXPECT_LT(R(1, 0, 0, "alpha"), R(1, 0, 0));
+  EXPECT_LT(R(1, 0, 0, "beta.2"), R(1, 0, 0, "beta.11"));
+
+  EXPECT_EQ(R(1, 2, 3, {}, "git.aaa"), R(1, 2, 3, {}, "git.bbb"));
+  const std::weak_ordering build_metadata_order =
+      R(1, 2, 3, {}, "git.aaa") <=> R(1, 2, 3, {}, "git.bbb");
+  EXPECT_EQ(build_metadata_order, std::weak_ordering::equivalent);
+  EXPECT_NE(R(1, 2, 3), R(1, 2, 4));
+}
+
+TEST(Version, RuntimeVersionComparesWithVersion) {
+  EXPECT_LT(R(1, 2, 3), V(1, 2, 4));
+  EXPECT_GT(V(1, 2, 4), R(1, 2, 3));
+
+  EXPECT_LT(V(1, 0, 0, "rc.1"), R(1, 0, 0));
+  EXPECT_GT(R(1, 0, 0), V(1, 0, 0, "rc.1"));
+
+  EXPECT_EQ(R(1, 2, 3, {}, "git.aaa"), V(1, 2, 3, {}, "git.bbb"));
+  EXPECT_EQ(V(1, 2, 3, {}, "git.bbb"), R(1, 2, 3, {}, "git.aaa"));
+  EXPECT_NE(R(1, 2, 3), V(1, 2, 3, "rc.1"));
 }
 
 TEST(Version, TryParseVersionAcceptsSupportedForms) {

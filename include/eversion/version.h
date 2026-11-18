@@ -24,16 +24,6 @@
  */
 namespace eversion {
 
-struct Version;
-
-/**
- * @brief Formats a version as `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`.
- *
- * @param version Version value to format.
- * @return A canonical string representation of @p version.
- */
-[[nodiscard]] std::string ToString(const Version& version);
-
 /**
  * @brief Version view used by generated headers and runtime metadata.
  *
@@ -79,61 +69,54 @@ struct Version {
   }
 
   /**
-   * @brief Formats this version as a canonical string.
+   * @brief Formats this version as `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`.
+   *
+   * @return A canonical string representation of this version.
    */
-  [[nodiscard]] std::string ToString() const;
+  [[nodiscard]] std::string ToString() const {
+    std::string text = std::to_string(major) + '.' + std::to_string(minor) +
+                       '.' + std::to_string(patch);
+    if (HasPrerelease()) {
+      text += '-';
+      text += prerelease;
+    }
+    if (HasBuildMetadata()) {
+      text += '+';
+      text += build_metadata;
+    }
+    return text;
+  }
 
   /**
-   * @brief Compares two versions by release precedence.
+   * @brief Compares this version with @p other by release precedence.
    *
    * Build metadata is ignored for precedence, so distinct versions that differ
    * only by build metadata are weakly equivalent.
+   *
+   * @param other Version to compare with.
    */
-  friend constexpr std::weak_ordering operator<=>(
-      const Version& left, const Version& right) noexcept;
+  [[nodiscard]] constexpr std::weak_ordering operator<=>(
+      const Version& other) const noexcept {
+    const std::strong_ordering core_order =
+        std::tie(major, minor, patch) <=>
+        std::tie(other.major, other.minor, other.patch);
+    if (core_order != std::strong_ordering::equal) {
+      return core_order;
+    }
+    return detail::ComparePrerelease(prerelease, other.prerelease);
+  }
+
   /**
-   * @brief Returns whether two versions have equal precedence.
+   * @brief Returns whether this version and @p other have equal precedence.
    *
    * Build metadata is ignored for equality.
+   *
+   * @param other Version to compare with.
    */
-  friend constexpr bool operator==(const Version& left,
-                                   const Version& right) noexcept;
+  [[nodiscard]] constexpr bool operator==(const Version& other) const noexcept {
+    return (*this <=> other) == std::weak_ordering::equivalent;
+  }
 };
-
-[[nodiscard]] constexpr std::weak_ordering operator<=>(
-    const Version& left, const Version& right) noexcept {
-  const std::strong_ordering core_order =
-      std::tie(left.major, left.minor, left.patch) <=>
-      std::tie(right.major, right.minor, right.patch);
-  if (core_order != std::strong_ordering::equal) {
-    return core_order;
-  }
-  return detail::ComparePrerelease(left.prerelease, right.prerelease);
-}
-
-[[nodiscard]] constexpr bool operator==(const Version& left,
-                                        const Version& right) noexcept {
-  return (left <=> right) == std::weak_ordering::equivalent;
-}
-
-inline std::string ToString(const Version& version) {
-  std::string text = std::to_string(version.major) + '.' +
-                     std::to_string(version.minor) + '.' +
-                     std::to_string(version.patch);
-  if (version.HasPrerelease()) {
-    text += '-';
-    text += version.prerelease;
-  }
-  if (version.HasBuildMetadata()) {
-    text += '+';
-    text += version.build_metadata;
-  }
-  return text;
-}
-
-inline std::string Version::ToString() const {
-  return eversion::ToString(*this);
-}
 
 }  // namespace eversion
 

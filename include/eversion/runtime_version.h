@@ -11,6 +11,7 @@
 #include <eversion/detail/runtime_version_parsing.h>
 #include <eversion/version.h>
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -75,10 +76,79 @@ struct RuntimeVersion {
   }
 
   /** @brief Formats this version as a canonical string. */
-  [[nodiscard]] std::string ToString() const {
-    return eversion::ToString(AsVersion());
+  [[nodiscard]] std::string ToString() const { return AsVersion().ToString(); }
+
+  /**
+   * @brief Compares this runtime version with @p other by release precedence.
+   *
+   * Uses the same rules as `Version`; build metadata is ignored.
+   *
+   * @param other Runtime version to compare with.
+   */
+  [[nodiscard]] std::weak_ordering operator<=>(
+      const RuntimeVersion& other) const noexcept {
+    return AsVersion() <=> other.AsVersion();
+  }
+
+  /**
+   * @brief Returns whether this runtime version and @p other have equal
+   * precedence.
+   *
+   * Build metadata is ignored for equality.
+   *
+   * @param other Runtime version to compare with.
+   */
+  [[nodiscard]] bool operator==(const RuntimeVersion& other) const noexcept {
+    return AsVersion() == other.AsVersion();
+  }
+
+  /**
+   * @brief Compares this runtime version with @p other by release precedence.
+   *
+   * The reversed form, with the `Version` on the left, is also available.
+   * Build metadata is ignored.
+   *
+   * @param other Version to compare with.
+   */
+  [[nodiscard]] std::weak_ordering operator<=>(
+      const Version& other) const noexcept {
+    return AsVersion() <=> other;
+  }
+
+  /**
+   * @brief Returns whether this runtime version and @p other have equal
+   * precedence.
+   *
+   * The reversed form, with the `Version` on the left, is also available.
+   * Build metadata is ignored for equality.
+   *
+   * @param other Version to compare with.
+   */
+  [[nodiscard]] bool operator==(const Version& other) const noexcept {
+    return AsVersion() == other;
   }
 };
+
+/**
+ * @brief Copies a version view into an owning runtime version.
+ *
+ * Use this to keep a `Version` beyond the lifetime of the storage it views,
+ * such as a view returned by `ToVersion()` for a dynamic plugin that may be
+ * unloaded later.
+ *
+ * @param version Version view to copy.
+ * @return A runtime version that owns copies of the prerelease and build
+ * metadata strings.
+ */
+[[nodiscard]] inline RuntimeVersion ToRuntimeVersion(const Version& version) {
+  return RuntimeVersion{
+      .major = version.major,
+      .minor = version.minor,
+      .patch = version.patch,
+      .prerelease = std::string{version.prerelease},
+      .build_metadata = std::string{version.build_metadata},
+  };
+}
 
 /**
  * @brief Parses a version string into an owning version value.
