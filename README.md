@@ -15,6 +15,7 @@ EVersion provides these pieces:
 | `eversion::Version` | A constexpr-friendly non-owning version view with weak precedence comparison and string formatting. |
 | `eversion::RuntimeVersion` | An owning runtime version value used by parsing and long-lived metadata. |
 | `eversion_declare()` | A CMake function that generates and installs an `inline constexpr` version header for a target. |
+| `<eversion/format.h>` | `std::format` and `operator<<` support for `Version` and `RuntimeVersion`. |
 | `<eversion/component_info.h>` | Stable C ABI component/plugin metadata types and validation APIs. |
 | `eversion_declare_plugin()` | A CMake function that generates a stable C ABI metadata entry point for a dynamic plugin. |
 
@@ -30,6 +31,9 @@ see [Template Version](#template-version).
 
 - [Release Branching Contract](docs/release-branching.md): branch roles,
   SemVer release flow, hotfix flow, and old-version support flow.
+- [Plugin Metadata ABI](docs/abi.md): the binary layout shared by hosts and
+  plugins, the rules for changing it, how to validate plugin metadata, and the
+  history of every layout.
 - [Tool Versions](docs/tool-versions.md): recommended versions of
   clang-format, clang-tidy, CMake, Doxygen, and gcovr, and the environments CI
   uses.
@@ -259,7 +263,10 @@ auto info_function =
     reinterpret_cast<eversion::ComponentInfoFunction>(symbol);
 
 const eversion::ComponentInfo* info = info_function();
-if (eversion::IsValidComponentInfo(info)) {
+// IsValidComponentInfo() checks the structure; IsWellFormedComponentVersion()
+// checks that the version strings follow the SemVer identifier grammar.
+if (eversion::IsValidComponentInfo(info) &&
+    eversion::IsWellFormedComponentVersion(info->version)) {
   // Owns copies of the strings, so it stays valid after dlclose().
   const eversion::RuntimeVersion plugin_version =
       eversion::ToRuntimeVersion(info->version);
@@ -315,39 +322,24 @@ using ComponentInfoFunction = const ComponentInfo* (*)() noexcept;
 }  // namespace eversion
 ```
 
-Host applications should call `eversion::IsValidComponentInfo()` before using a
-returned `ComponentInfo`. Within one `kComponentInfoAbiVersion` layout family,
-future fields may only be appended to the end of `ComponentInfo`. Hosts that
-read appended fields must first call `IsComponentInfoFieldAvailable()`. If a
-loaded plugin is older and does not provide a later field, the host must use a
-default value or treat that field as unavailable. Breaking layout changes must
-bump `kComponentInfoAbiVersion`.
+The rules, in short:
 
-`ComponentVersion` is a fixed type. It holds exactly the five parts of a
-SemVer 2.0.0 version, `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`, and will not
-gain fields:
+- Existing fields never change. Within one `kComponentInfoAbiVersion`, new
+  fields are only appended to the end of `ComponentInfo`, and hosts read them
+  only after `IsComponentInfoFieldAvailable()` confirms that the plugin's
+  `struct_size` covers them. Any other change bumps `kComponentInfoAbiVersion`.
+- `ComponentVersion` is fixed: it holds exactly the five SemVer parts and never
+  gains fields.
+- The layout holds only between a host and plugins built for the same
+  architecture.
+- `IsValidComponentInfo()` checks the structure and is required before reading
+  any field. `IsWellFormedComponentVersion()` checks that the prerelease and build
+  metadata strings follow the SemVer identifier grammar; a valid structure does
+  not mean the plugin's strings are well formed.
 
-- A release channel, build number, commit, or date belongs in the prerelease or
-  build metadata, as SemVer intends.
-- Information about the component rather than its version, such as a homepage
-  or a license, is appended to the end of `ComponentInfo`.
-
-`ComponentVersion` is embedded by value in `ComponentInfo`, and its size is part
-of `kComponentInfoRequiredSize`. Growing it would move every field appended after
-it, and new hosts would reject every existing plugin because their `struct_size`
-would be smaller than the new minimum. The tests lock the ABI v1 layout; on
-64-bit Linux it is:
-
-| Structure | Field offsets in bytes | Size in bytes |
-| --- | --- | --- |
-| `ComponentVersion` | `major` 0, `minor` 4, `patch` 8, `prerelease` 16, `build_metadata` 24 | 32 |
-| `ComponentInfo` | `abi_version` 0, `struct_size` 8, `id` 16, `name` 24, `version` 32 | 64 (`kComponentInfoRequiredSize`) |
-
-The layout contains `std::size_t` and pointers, so the contract holds only
-between a host and plugins built for the same architecture, with the same
-pointer width and alignment, as for any C ABI. The CMake package is
-`ARCH_INDEPENDENT` because consumers compile the headers themselves; that does
-not make plugin binaries portable across architectures.
+[docs/abi.md](docs/abi.md) is the full reference: the field-by-field layout of
+the current ABI, the reasons for each rule, the validation guidance, the steps
+for changing the ABI, and the history of every layout.
 
 ## Use Version Values
 
@@ -364,9 +356,18 @@ static_assert(current >= minimum);
 
 `eversion::Version` is a non-owning view: `prerelease` and `build_metadata` are
 `std::string_view` members. Use it for generated constants, string literals, or
-other storage that is known to outlive the view. Include
-`<eversion/runtime_version.h>` when parsed strings or metadata need owned
-storage. `RuntimeVersion` owns its strings and has the same queries as
+other storage that is known to outlive the view. `ToString()` is
+`constexpr`, so a version can also be checked as text at compile time, for
+example `static_assert(current.ToString() == "1.4.0")`.
+
+`Version` does not validate its string members; any text can be stored in
+them. `eversion_declare()` and `TryParseVersion()` accept only valid
+identifiers, and plugin versions can be checked with
+`IsWellFormedComponentVersion()`. Invalid text causes no undefined behavior; it
+only compares in byte order.
+
+Include `<eversion/runtime_version.h>` when parsed strings or metadata need
+owned storage. `RuntimeVersion` owns its strings and has the same queries as
 `Version`. It compares with other `RuntimeVersion` values and with `Version`
 values by the same precedence rules, and ignores build metadata too:
 
@@ -419,6 +420,62 @@ Version comparison rules:
 
 Therefore, `1.2.3+git.a` and `1.2.3+git.b` compare as weakly equivalent even
 though their string representations remain distinct.
+
+### Exact Equality
+
+`==` asks whether two versions have the same precedence. To ask whether every
+field is the same, including the exact prerelease and build metadata text, use
+`IsIdenticalTo()`. Two versions are identical exactly when `ToString()` gives
+the same text:
+
+| Pair | `a == b` | `a.IsIdenticalTo(b)` |
+| --- | --- | --- |
+| `1.2.3+a` and `1.2.3+b` | true | false |
+| `1.0.0-rc.007` and `1.0.0-rc.7` | true | false |
+| `1.2.3-rc.1+a` and `1.2.3-rc.1+a` | true | true |
+
+`Version::IsIdenticalTo()` takes a `Version` and is `constexpr`.
+`RuntimeVersion::IsIdenticalTo()` takes a `RuntimeVersion` or a `Version`. With
+a `Version` on the left and a `RuntimeVersion` on the right, swap the operands.
+
+### Hashing
+
+`std::hash` is specialized for `Version` in `<eversion/version.h>` and for
+`RuntimeVersion` in `<eversion/runtime_version.h>`, so both work as keys of
+`std::unordered_map` and `std::unordered_set`. The hash agrees with `==`: it
+ignores build metadata and reads numeric prerelease identifiers as numbers, so
+`1.2.3+a` and `1.2.3+b` hash equally, and so do `1.0.0-rc.007` and
+`1.0.0-rc.7`. A `RuntimeVersion` hashes to the same value as an equal `Version`.
+
+```cpp
+#include <eversion/runtime_version.h>
+
+#include <unordered_map>
+
+std::unordered_map<eversion::RuntimeVersion, int> plugin_count;
+```
+
+### Formatting
+
+Include `<eversion/format.h>` to format versions with `std::format` or write
+them to a `std::ostream`. Both produce `ToString()`. The format specification is
+the one for strings, so width, alignment, and fill work:
+
+```cpp
+#include <eversion/format.h>
+
+#include <format>
+#include <iostream>
+#include <string>
+
+const eversion::Version version{.major = 1, .minor = 2, .patch = 3};
+std::cout << version << '\n';                           // 1.2.3
+const std::string row = std::format("{:>9}|", version);  // "    1.2.3|"
+```
+
+`<eversion/format.h>` is a separate header because `<format>` noticeably slows
+down the compilation of every translation unit that includes it. Including
+`<eversion/version.h>` alone does not pull it in.
 
 ## Add Build Metadata
 
@@ -574,6 +631,9 @@ guidance, and commands for running tests. The tests cover:
 - `eversion::RuntimeVersion`, `TryParseVersion()` parsing boundaries, copies
   made by `ToRuntimeVersion()`, and comparisons with `RuntimeVersion` and
   `Version` values.
+- Hashing that agrees with `==`, use as keys of unordered containers, and exact
+  equality with `IsIdenticalTo()`.
+- `std::format` and `operator<<` from `<eversion/format.h>`.
 - Compile-time constants generated by `eversion_declare()`.
 - Copying a `ComponentVersion` into a `RuntimeVersion` with
   `ToRuntimeVersion()`, including null string handling and use after the plugin

@@ -15,6 +15,9 @@ the last state of the earlier one.
 
 ### Changed
 
+- `Version::ToString()` and `RuntimeVersion::ToString()` are `constexpr`, so
+  `static_assert(version.ToString() == "1.2.3")` compiles. The output is
+  unchanged.
 - `eversion_declare()` and `eversion_declare_plugin()` stop the configure step
   with an error in two more cases. Before, these configured without an error and
   failed later with a misleading compiler error:
@@ -49,6 +52,24 @@ the last state of the earlier one.
 
 ### Added
 
+- `IsWellFormedComponentVersion()` in `<eversion/component_info.h>` checks that
+  the prerelease and build metadata strings of a plugin's `ComponentVersion`
+  follow the SemVer identifier grammar. `IsValidComponentInfo()` checks only the
+  structure, so a plugin could report malformed strings such as `"bad id!! "`.
+  The check is optional; `examples/version_report` uses it.
+- `docs/abi.md`, the reference for the plugin metadata ABI: the current layout,
+  the rules for changing it, validation guidance, and the history of every
+  layout.
+- `std::hash` for `Version` and `RuntimeVersion`, so both work as keys of
+  unordered containers. The hash agrees with `==`: it ignores build metadata and
+  reads numeric prerelease identifiers as numbers.
+- `<eversion/format.h>`, with `std::formatter` and `operator<<` for `Version`
+  and `RuntimeVersion`. Formatting uses the string format specification, so
+  width, alignment, and fill work. It is a separate header so that code that
+  does not format versions does not pay for `<format>`.
+- `IsIdenticalTo()` on `Version` and `RuntimeVersion` compares every field,
+  including the exact prerelease and build metadata text, unlike `==`, which
+  compares precedence.
 - `ToRuntimeVersion()` in `<eversion/runtime_version.h>` copies a `Version`
   into an owning `RuntimeVersion`, for example to keep a plugin's version after
   the plugin is unloaded. Before, each field had to be copied by hand.
