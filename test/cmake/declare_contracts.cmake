@@ -45,6 +45,11 @@ function(_eversion_join_body output_var)
 endfunction()
 
 function(_eversion_expect_configure_failure case_name)
+  _eversion_expect_configure_failure_containing("${case_name}" "" ${ARGN})
+endfunction()
+
+function(_eversion_expect_configure_failure_containing case_name
+  expected_texts)
   _eversion_join_body(body ${ARGN})
   _eversion_write_project("${case_name}" "${body}")
   execute_process(
@@ -61,6 +66,22 @@ function(_eversion_expect_configure_failure case_name)
       "stdout:\n${output}\n"
       "stderr:\n${error}")
   endif()
+
+  string(REGEX REPLACE "[ \t\r\n]+" " " normalized_error "${error}")
+  foreach(expected_text IN LISTS expected_texts)
+    string(REPLACE "<CASE_DIR>" "${${case_name}_source_dir}"
+      expected_text_with_case_dir "${expected_text}")
+    string(REGEX REPLACE "[ \t\r\n]+" " " normalized_expected
+      "${expected_text_with_case_dir}")
+    string(FIND "${normalized_error}" "${normalized_expected}" position)
+    if(position LESS 0)
+      message(FATAL_ERROR
+        "${case_name} failed to configure, but stderr does not contain "
+        "'${expected_text}'\n"
+        "stdout:\n${output}\n"
+        "stderr:\n${error}")
+    endif()
+  endforeach()
 endfunction()
 
 function(_eversion_expect_configure_success case_name)
@@ -82,17 +103,52 @@ function(_eversion_expect_configure_success case_name)
   endif()
 endfunction()
 
-_eversion_expect_configure_failure("duplicate_namespace"
+_eversion_expect_configure_failure_containing("duplicate_namespace"
+"NAMESPACE='duplicate::version_info';'first';OUTPUT='first/version_info.h';<CASE_DIR>/CMakeLists.txt"
 "add_library(first INTERFACE)\n"
 "eversion_declare(first NAMESPACE duplicate::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT first/version_info.h NO_INSTALL)\n"
 "add_library(second INTERFACE)\n"
 "eversion_declare(second NAMESPACE duplicate::version_info MAJOR 2 MINOR 0 PATCH 0 OUTPUT second/version_info.h NO_INSTALL)\n")
 
-_eversion_expect_configure_failure("duplicate_output"
+_eversion_expect_configure_failure_containing("duplicate_output"
+"OUTPUT='shared/version_info.h';'first';<CASE_DIR>/CMakeLists.txt"
 "add_library(first INTERFACE)\n"
 "eversion_declare(first NAMESPACE first::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT shared/version_info.h NO_INSTALL)\n"
 "add_library(second INTERFACE)\n"
 "eversion_declare(second NAMESPACE second::version_info MAJOR 2 MINOR 0 PATCH 0 OUTPUT shared/version_info.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure_containing("duplicate_header_guard"
+"HEADER_GUARD='FFMPEG_WRAP_VERSION_INFO_H_';'ffmpeg-wrap/version_info.h';'ffmpeg_wrap/version_info.h';'first';<CASE_DIR>/CMakeLists.txt"
+"add_library(first INTERFACE)\n"
+"eversion_declare(first NAMESPACE first::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT ffmpeg-wrap/version_info.h NO_INSTALL)\n"
+"add_library(second INTERFACE)\n"
+"eversion_declare(second NAMESPACE second::version_info MAJOR 2 MINOR 0 PATCH 0 OUTPUT ffmpeg_wrap/version_info.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure_containing("duplicate_header_guard_case"
+"HEADER_GUARD='MEDIA_VERSION_INFO_H_';'Media/version_info.h';'media/version_info.h';'first';<CASE_DIR>/CMakeLists.txt"
+"add_library(first INTERFACE)\n"
+"eversion_declare(first NAMESPACE first::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT Media/version_info.h NO_INSTALL)\n"
+"add_library(second INTERFACE)\n"
+"eversion_declare(second NAMESPACE second::version_info MAJOR 2 MINOR 0 PATCH 0 OUTPUT media/version_info.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure_containing("reserved_namespace"
+"NAMESPACE='eversion::tools';reserved for EVersion"
+"add_library(reserved_namespace INTERFACE)\n"
+"eversion_declare(reserved_namespace NAMESPACE eversion::tools MAJOR 1 MINOR 0 PATCH 0 OUTPUT reserved_namespace/version_info.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure_containing("reserved_output"
+"OUTPUT='eversion/tools.h';reserved for EVersion"
+"add_library(reserved_output INTERFACE)\n"
+"eversion_declare(reserved_output NAMESPACE reserved_output::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT eversion/tools.h NO_INSTALL)\n")
+
+_eversion_expect_configure_failure_containing("reserved_header_guard"
+"OUTPUT='eversion_version.h';EVERSION_VERSION_H_;reserved for EVersion"
+"add_library(reserved_header_guard INTERFACE)\n"
+"eversion_declare(reserved_header_guard NAMESPACE reserved_header_guard::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT eversion_version.h NO_INSTALL)\n")
+
+_eversion_expect_configure_success("digit_output"
+"add_library(digit_output INTERFACE)\n"
+"eversion_declare(digit_output NAMESPACE digit_output::version_info MAJOR 1 MINOR 0 PATCH 0 OUTPUT 3d/version_info.h NO_INSTALL)\n")
 
 _eversion_expect_configure_failure("invalid_output"
 "add_library(bad INTERFACE)\n"

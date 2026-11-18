@@ -113,7 +113,8 @@ function(_eversion_normalize_version_number target_name argument_name
   set("${output_variable}" "${normalized_number}" PARENT_SCOPE)
 endfunction()
 
-function(_eversion_register_unique_value target_name kind value property_name)
+function(_eversion_register_unique_value target_name kind value property_name
+  current_output)
   get_property(existing_values GLOBAL PROPERTY "${property_name}")
   foreach(entry IN LISTS existing_values)
     string(FIND "${entry}" "|" separator)
@@ -124,9 +125,23 @@ function(_eversion_register_unique_value target_name kind value property_name)
     math(EXPR target_offset "${separator} + 1")
     string(SUBSTRING "${entry}" "${target_offset}" -1 existing_target)
     if(existing_value STREQUAL value)
-      message(FATAL_ERROR
-        "eversion_declare(${target_name}): ${kind}='${value}' "
-        "is already used by target '${existing_target}'")
+      get_target_property(existing_output "${existing_target}"
+        EVERSION_OUTPUT)
+      get_target_property(existing_declared_in "${existing_target}"
+        EVERSION_DECLARED_IN)
+      if(kind STREQUAL "HEADER_GUARD")
+        message(FATAL_ERROR
+          "eversion_declare(${target_name}): ${kind}='${value}' "
+          "(from OUTPUT='${current_output}') is already used by target "
+          "'${existing_target}' (OUTPUT='${existing_output}', declared in "
+          "${existing_declared_in}). Use OUTPUT values that differ in more "
+          "than punctuation or letter case.")
+      else()
+        message(FATAL_ERROR
+          "eversion_declare(${target_name}): ${kind}='${value}' is already "
+          "used by target '${existing_target}' (OUTPUT='${existing_output}', "
+          "declared in ${existing_declared_in}).")
+      endif()
     endif()
   endforeach()
 
@@ -228,6 +243,62 @@ function(eversion_declare target_name)
   _eversion_normalize_relative_path(
     "eversion_declare(${target_name})" OUTPUT "${EV_OUTPUT}" EV_OUTPUT)
 
+  set(header_guard_from_output "${EV_OUTPUT}")
+  string(REGEX REPLACE "[^A-Za-z0-9]" "_"
+    header_guard_from_output "${header_guard_from_output}")
+  string(TOUPPER "${header_guard_from_output}" header_guard_from_output)
+
+  set(EVERSION_HEADER_GUARD "${header_guard_from_output}")
+  if(NOT EVERSION_HEADER_GUARD MATCHES "^[A-Z_]")
+    set(EVERSION_HEADER_GUARD "EVERSION_${EVERSION_HEADER_GUARD}")
+  endif()
+  set(EVERSION_HEADER_GUARD "${EVERSION_HEADER_GUARD}_")
+
+  set(declaration_is_from_eversion FALSE)
+  if(PROJECT_NAME STREQUAL "eversion")
+    set(declaration_is_from_eversion TRUE)
+  endif()
+
+  if(NOT declaration_is_from_eversion)
+    set(namespace_is_reserved FALSE)
+    if(EV_NAMESPACE STREQUAL "eversion")
+      set(namespace_is_reserved TRUE)
+    elseif(EV_NAMESPACE MATCHES "^eversion::")
+      set(namespace_is_reserved TRUE)
+    endif()
+    if(namespace_is_reserved)
+      message(FATAL_ERROR
+        "eversion_declare(${target_name}): NAMESPACE='${EV_NAMESPACE}' is "
+        "reserved for EVersion. Use a namespace that starts with your "
+        "project's own name, such as 'my_project::version_info'.")
+    endif()
+
+    set(output_is_reserved FALSE)
+    if(EV_OUTPUT MATCHES "^eversion/")
+      set(output_is_reserved TRUE)
+    endif()
+    if(output_is_reserved)
+      message(FATAL_ERROR
+        "eversion_declare(${target_name}): OUTPUT='${EV_OUTPUT}' is "
+        "reserved for EVersion's own headers. Use an OUTPUT that starts "
+        "with your project's own name.")
+    endif()
+
+    set(header_guard_is_reserved FALSE)
+    if(header_guard_from_output STREQUAL "EVERSION")
+      set(header_guard_is_reserved TRUE)
+    elseif(header_guard_from_output MATCHES "^EVERSION_")
+      set(header_guard_is_reserved TRUE)
+    endif()
+    if(header_guard_is_reserved)
+      message(FATAL_ERROR
+        "eversion_declare(${target_name}): OUTPUT='${EV_OUTPUT}' gives the "
+        "header guard '${EVERSION_HEADER_GUARD}', and the 'EVERSION_' prefix "
+        "is reserved for EVersion's own headers. Use an OUTPUT that starts "
+        "with your project's own name.")
+    endif()
+  endif()
+
   if(NOT DEFINED EV_TEMPLATE)
     set(EV_TEMPLATE "${_EVERSION_DECLARE_TEMPLATE}")
   endif()
@@ -237,10 +308,17 @@ function(eversion_declare target_name)
       "does not exist")
   endif()
 
+  set_target_properties("${target_name}" PROPERTIES
+    EVERSION_OUTPUT "${EV_OUTPUT}"
+    EVERSION_DECLARED_IN "${CMAKE_CURRENT_LIST_FILE}"
+  )
+
   _eversion_register_unique_value("${target_name}" NAMESPACE
-    "${EV_NAMESPACE}" EVERSION_DECLARE_NAMESPACES)
+    "${EV_NAMESPACE}" EVERSION_DECLARE_NAMESPACES "${EV_OUTPUT}")
   _eversion_register_unique_value("${target_name}" OUTPUT
-    "${EV_OUTPUT}" EVERSION_DECLARE_OUTPUTS)
+    "${EV_OUTPUT}" EVERSION_DECLARE_OUTPUTS "${EV_OUTPUT}")
+  _eversion_register_unique_value("${target_name}" HEADER_GUARD
+    "${EVERSION_HEADER_GUARD}" EVERSION_DECLARE_HEADER_GUARDS "${EV_OUTPUT}")
 
   set(version_string "${EV_MAJOR}.${EV_MINOR}.${EV_PATCH}")
   if(NOT EV_PRERELEASE STREQUAL "")
@@ -276,13 +354,6 @@ function(eversion_declare target_name)
   endif()
   set(EVERSION_VERSION_STRING "${version_string}")
   set(EVERSION_DECLARE_CALLER "${CMAKE_CURRENT_LIST_FILE}")
-  set(EVERSION_HEADER_GUARD "${EV_OUTPUT}")
-  string(REGEX REPLACE "[^A-Za-z0-9]" "_" EVERSION_HEADER_GUARD "${EVERSION_HEADER_GUARD}")
-  string(TOUPPER "${EVERSION_HEADER_GUARD}" EVERSION_HEADER_GUARD)
-  if(NOT EVERSION_HEADER_GUARD MATCHES "^[A-Z_]")
-    set(EVERSION_HEADER_GUARD "EVERSION_${EVERSION_HEADER_GUARD}")
-  endif()
-  set(EVERSION_HEADER_GUARD "${EVERSION_HEADER_GUARD}_")
 
   configure_file("${EV_TEMPLATE}" "${output_file}" @ONLY)
 
