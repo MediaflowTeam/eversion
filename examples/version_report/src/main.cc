@@ -78,7 +78,7 @@ bool PrintPluginInfo(const char* path) {
 
   // ToVersion() views point into plugin storage, so format before dlclose().
   const std::string version_string =
-      eversion::ToString(eversion::ToVersion(info->version));
+      eversion::ToVersion(info->version).ToString();
   PrintHostVersions();
   std::cout << "plugin " << info->id << " (" << info->name << ") "
             << version_string << '\n';
