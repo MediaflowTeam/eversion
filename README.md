@@ -158,13 +158,51 @@ By default, `eversion_declare()` adds both build and install include paths and
 installs the generated header under `include/<OUTPUT directory>`. Use
 `NO_INSTALL` for purely internal generated headers. Use `INSTALL_DESTINATION`
 when a project intentionally installs public headers somewhere other than
-`${CMAKE_INSTALL_INCLUDEDIR}`. `OUTPUT` must be a safe relative path, and each
-configure may use a generated `NAMESPACE` or `OUTPUT` only once.
+`${CMAKE_INSTALL_INCLUDEDIR}`. `OUTPUT` must be a safe relative path.
 
 `MAJOR`, `MINOR`, and `PATCH` are decimal numbers. Leading zeros are dropped,
 so `project(sample_core VERSION 2026.09.1)` with the arguments above generates
 `kVersionMinor == 9` and `kVersionString == "2026.9.1"`. A value above
 4294967295 stops the configure step with an error.
+
+### Choosing `NAMESPACE` and `OUTPUT`
+
+The generated header is protected by an include guard derived from `OUTPUT`:
+characters other than letters and digits become `_`, and the result is upper
+case. `sample_core/version_info.h` gets `SAMPLE_CORE_VERSION_INFO_H_`.
+
+Within one configure, `eversion_declare()` stops with an error when two targets
+use the same `NAMESPACE`, the same `OUTPUT`, or two `OUTPUT` values that give the
+same include guard, such as `ffmpeg-wrap/version_info.h` and
+`ffmpeg_wrap/version_info.h`. The error names the target that declared the value
+first, its `OUTPUT`, and the `CMakeLists.txt` it was declared in; the CMake call
+stack below the error shows the second declaration.
+
+EVersion cannot see the names used by packages that were configured and installed
+separately. Two such libraries with clashing names configure without an error,
+and a program that uses both breaks later: a header found first on the include
+path hides the other one, a second header with the same include guard is skipped,
+or the same `inline` constant gets two definitions in different translation
+units, which no compiler or linker reports. Follow this convention so that the
+names stay unique:
+
+- Start both `NAMESPACE` and `OUTPUT` with your project's own unique name, and
+  make them match: `NAMESPACE mediaflow::base::version_info` with
+  `OUTPUT mediaflow/base/version_info.h`, and `mediaflow::flow::version_info`
+  with `mediaflow/flow/version_info.h` for a second library of the same project.
+- Write `OUTPUT` explicitly. Without it, the path is derived from `NAMESPACE`, so
+  `mediaflow::base::version_info` would give
+  `mediaflow/base/version_info/version_info.h`.
+- Do not use generic top-level names such as `version_info.h` or
+  `version::info`, and do not tell two libraries apart only by `-` versus `_` or
+  by letter case.
+
+The `eversion` names are reserved for EVersion's own generated header. Outside
+the `eversion` project, `eversion_declare()` rejects a `NAMESPACE` that is
+`eversion` or starts with `eversion::`, an `OUTPUT` that starts with `eversion/`,
+and an `OUTPUT` whose include guard starts with `EVERSION_`, such as
+`eversion_version.h`, whose guard `EVERSION_VERSION_H_` is the guard of
+`<eversion/version.h>`.
 
 ## Generate Version Metadata for a Dynamic Plugin
 
@@ -222,20 +260,22 @@ auto info_function =
 
 const eversion::ComponentInfo* info = info_function();
 if (eversion::IsValidComponentInfo(info)) {
-  const eversion::Version plugin_version = eversion::ToVersion(info->version);
-  const eversion::RuntimeVersion retained_version =
-      eversion::ToRuntimeVersion(plugin_version);
+  // Owns copies of the strings, so it stays valid after dlclose().
+  const eversion::RuntimeVersion plugin_version =
+      eversion::ToRuntimeVersion(info->version);
+  // info->id and info->name point into the plugin; copy them before dlclose()
+  // if they are needed later.
+  const std::string plugin_id{info->id};
 }
 ```
 
 Plugin discovery, `dlopen()` and `dlclose()`, dynamic-library lifetime, and
 error handling are host responsibilities; see
 [`examples/version_report`](examples/README.md) for a complete host.
-`ToVersion(ComponentVersion)` returns a non-owning view into the
-plugin-provided strings, so do not keep that `Version` after unloading the
-plugin. If the value must live longer than the plugin library, include
-`<eversion/runtime_version.h>` and copy it into a `RuntimeVersion` with
-`ToRuntimeVersion()`, as above.
+`ToRuntimeVersion(ComponentVersion)` copies the plugin-provided strings into a
+`RuntimeVersion`, so the version can be kept after the plugin is unloaded. The
+`id` and `name` fields of `ComponentInfo` are still `const char*` pointers into
+the plugin; copy them as well if they must outlive the plugin library.
 
 ## Runtime Metadata ABI
 
@@ -283,6 +323,32 @@ loaded plugin is older and does not provide a later field, the host must use a
 default value or treat that field as unavailable. Breaking layout changes must
 bump `kComponentInfoAbiVersion`.
 
+`ComponentVersion` is a fixed type. It holds exactly the five parts of a
+SemVer 2.0.0 version, `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`, and will not
+gain fields:
+
+- A release channel, build number, commit, or date belongs in the prerelease or
+  build metadata, as SemVer intends.
+- Information about the component rather than its version, such as a homepage
+  or a license, is appended to the end of `ComponentInfo`.
+
+`ComponentVersion` is embedded by value in `ComponentInfo`, and its size is part
+of `kComponentInfoRequiredSize`. Growing it would move every field appended after
+it, and new hosts would reject every existing plugin because their `struct_size`
+would be smaller than the new minimum. The tests lock the ABI v1 layout; on
+64-bit Linux it is:
+
+| Structure | Field offsets in bytes | Size in bytes |
+| --- | --- | --- |
+| `ComponentVersion` | `major` 0, `minor` 4, `patch` 8, `prerelease` 16, `build_metadata` 24 | 32 |
+| `ComponentInfo` | `abi_version` 0, `struct_size` 8, `id` 16, `name` 24, `version` 32 | 64 (`kComponentInfoRequiredSize`) |
+
+The layout contains `std::size_t` and pointers, so the contract holds only
+between a host and plugins built for the same architecture, with the same
+pointer width and alignment, as for any C ABI. The CMake package is
+`ARCH_INDEPENDENT` because consumers compile the headers themselves; that does
+not make plugin binaries portable across architectures.
+
 ## Use Version Values
 
 If a project does not need generated headers, it can include the value type
@@ -300,46 +366,37 @@ static_assert(current >= minimum);
 `std::string_view` members. Use it for generated constants, string literals, or
 other storage that is known to outlive the view. Include
 `<eversion/runtime_version.h>` when parsed strings or metadata need owned
-storage:
+storage. `RuntimeVersion` owns its strings and has the same queries as
+`Version`. It compares with other `RuntimeVersion` values and with `Version`
+values by the same precedence rules, and ignores build metadata too:
 
 ```cpp
 #include <eversion/runtime_version.h>
 
 #include <optional>
 
-std::optional<eversion::RuntimeVersion> parsed =
+const std::optional<eversion::RuntimeVersion> parsed =
     eversion::TryParseVersion("1.2.3-rc.1+git.deadbeef");
-if (parsed.has_value()) {
-  eversion::Version view = parsed->AsVersion();
-}
-```
-
-`AsVersion()` returns a view into the `RuntimeVersion` it is called on, so keep
-that object alive while the view is in use. Calling it on an rvalue, such as
-`TryParseVersion(text).value().AsVersion()`, does not compile. The compiler
-cannot catch `TryParseVersion(text)->AsVersion()`, which also leaves a dangling
-view: store the parsed value in a variable first, as above.
-
-To keep a `Version` longer than the storage it views, copy it with
-`ToRuntimeVersion()`, which returns a `RuntimeVersion` that owns copies of the
-prerelease and build metadata strings:
-
-```cpp
-const eversion::RuntimeVersion kept = eversion::ToRuntimeVersion(view);
-```
-
-`RuntimeVersion` values compare with each other and with `Version` values by
-the same precedence rules, so there is no need to take views first. Build
-metadata is ignored here too:
-
-```cpp
 if (parsed.has_value() && *parsed < sample_core::version_info::kVersion) {
   // The parsed version is older than this build.
 }
 ```
 
-`Version` and `RuntimeVersion` do not convert to each other implicitly; use
-`AsVersion()` or `ToRuntimeVersion()`.
+`RuntimeVersion` does not hand out `Version` views of its strings, so a stored
+`RuntimeVersion` cannot dangle. The other direction is a copy:
+`ToRuntimeVersion()` returns a `RuntimeVersion` that owns copies of a
+`Version`'s prerelease and build metadata strings. Use it to keep a `Version`
+longer than the storage it views:
+
+```cpp
+std::string prerelease = "rc.1";
+const eversion::Version view{.major = 1, .minor = 2, .patch = 3,
+                             .prerelease = prerelease};
+const eversion::RuntimeVersion kept = eversion::ToRuntimeVersion(view);
+prerelease = "rc.2";  // kept.prerelease is still "rc.1"
+```
+
+`Version` and `RuntimeVersion` do not convert to each other implicitly.
 
 `TryParseVersion()` accepts `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`. Core
 components must fit in `std::uint32_t`; prerelease and build metadata use the
@@ -518,8 +575,9 @@ guidance, and commands for running tests. The tests cover:
   made by `ToRuntimeVersion()`, and comparisons with `RuntimeVersion` and
   `Version` values.
 - Compile-time constants generated by `eversion_declare()`.
-- Conversion from `ComponentVersion` to `eversion::Version`, including null
-  string handling.
+- Copying a `ComponentVersion` into a `RuntimeVersion` with
+  `ToRuntimeVersion()`, including null string handling and use after the plugin
+  is unloaded.
 - ABI validation, type boundaries, and field availability for `ComponentInfo`.
 - Dynamic plugin metadata generated by `eversion_declare_plugin()`.
 - The argument checks of `eversion_declare()`.

@@ -15,6 +15,17 @@ the last state of the earlier one.
 
 ### Changed
 
+- `eversion_declare()` and `eversion_declare_plugin()` stop the configure step
+  with an error in two more cases. Before, these configured without an error and
+  failed later with a misleading compiler error:
+  - two targets whose `OUTPUT` values give the same include guard, such as
+    `ffmpeg-wrap/version_info.h` and `ffmpeg_wrap/version_info.h`;
+  - outside the `eversion` project, a `NAMESPACE` that is `eversion` or starts
+    with `eversion::`, an `OUTPUT` that starts with `eversion/`, or an `OUTPUT`
+    whose include guard starts with `EVERSION_`.
+
+  An error about a repeated `NAMESPACE`, `OUTPUT`, or include guard now names the
+  earlier target, its `OUTPUT`, and the `CMakeLists.txt` it was declared in.
 - The CMake package is named `eversion` instead of `EVersion`. Consumers use
   `find_package(eversion CONFIG REQUIRED)`, and the package files are installed
   to `<libdir>/cmake/eversion/`. The `eversion::eversion` target, the
@@ -35,10 +46,6 @@ the last state of the earlier one.
 - The tests moved from `tests/` to `test/`.
 - The `asan-ubsan` preset compiles with `-fno-sanitize-recover=all`, so an
   UndefinedBehaviorSanitizer report fails the test.
-- `RuntimeVersion::AsVersion()` no longer compiles when it is called on an
-  rvalue `RuntimeVersion`, such as a function's return value or
-  `TryParseVersion(text).value()`. The returned view would point at strings
-  destroyed at the end of the statement. Store the value in a variable first.
 
 ### Added
 
@@ -47,8 +54,8 @@ the last state of the earlier one.
   the plugin is unloaded. Before, each field had to be copied by hand.
 - `RuntimeVersion` has `<=>` and `==`, both with another `RuntimeVersion` and
   with a `Version` on either side. They use the same precedence rules as
-  `Version` and ignore build metadata. Before, both sides had to be converted
-  with `AsVersion()` first.
+  `Version` and ignore build metadata. They replace converting both sides
+  with `AsVersion()`, which is removed.
 - `examples/version_report`, a plugin host built only against the installed
   package and run by `quality.py check`.
 - The `coverage` and `docs` presets, with the `eversion_ENABLE_COVERAGE` and
@@ -88,6 +95,16 @@ the last state of the earlier one.
 
 ### Removed
 
+- `ToVersion(const ComponentVersion&)`. Use `ToRuntimeVersion()` with the same
+  argument instead: it copies the plugin's strings into a `RuntimeVersion`, so
+  the version stays valid after the plugin library is unloaded. The view that
+  `ToVersion()` returned pointed into the plugin and dangled after `dlclose()`.
+  The replacement is not `constexpr` or `noexcept`, because it copies strings.
+- `RuntimeVersion::AsVersion()`. A `RuntimeVersion` no longer hands out
+  `Version` views of its strings, so a stored value cannot dangle. Before,
+  `TryParseVersion(text)->AsVersion()` compiled and returned a view into a
+  temporary that was destroyed at the end of the statement. Compare a
+  `RuntimeVersion` directly with `<=>` and `==` instead.
 - The free function `eversion::ToString(const Version&)`. It did the same as
   the member `Version::ToString()`, which remains; write `version.ToString()`
   instead.
