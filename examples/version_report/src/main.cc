@@ -75,6 +75,10 @@ bool PrintPluginInfo(const char* path) {
     std::cerr << "error: plugin metadata is invalid\n";
     return false;
   }
+  if (!eversion::IsWellFormedComponentVersion(info->version)) {
+    std::cerr << "error: plugin version metadata is malformed\n";
+    return false;
+  }
 
   const eversion::RuntimeVersion plugin_version =
       eversion::ToRuntimeVersion(info->version);

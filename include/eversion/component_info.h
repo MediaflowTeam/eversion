@@ -9,6 +9,7 @@
 #define EVERSION_COMPONENT_INFO_H_
 
 #include <eversion/detail/component_info_strings.h>
+#include <eversion/detail/runtime_version_parsing.h>
 #include <eversion/runtime_version.h>
 
 #include <cstddef>
@@ -144,6 +145,44 @@ using ComponentInfoFunction = const ComponentInfo* (*)() noexcept;
          info->id != nullptr && info->name != nullptr &&
          info->version.prerelease != nullptr &&
          info->version.build_metadata != nullptr;
+}
+
+/**
+ * @brief Validates the text content of component version metadata.
+ *
+ * `IsValidComponentInfo()` checks only the ABI structure: ABI version, minimum
+ * structure size, and non-null pointers. This function checks the content of
+ * the prerelease and build metadata strings that crosses the same plugin
+ * boundary. Both are checks a host should perform before trusting plugin
+ * metadata.
+ *
+ * This check is optional. When a host does not call it, malformed strings are
+ * copied unchanged and take part in comparisons in lexicographic order.
+ *
+ * Accepted syntax is the same as `TryParseVersion()`: an empty string means the
+ * value is absent; otherwise the text must be a dot-separated list of non-empty
+ * identifiers containing only `[0-9A-Za-z-]`. Leading zeros in numeric
+ * identifiers are accepted.
+ *
+ * @param version Component version metadata to validate.
+ * @return `true` when both strings are well formed, or `false` when either
+ * string is null or malformed.
+ */
+[[nodiscard]] constexpr bool IsWellFormedComponentVersion(
+    const ComponentVersion& version) noexcept {
+  // A null pointer means broken metadata. An empty string is valid: it means
+  // the version has no prerelease or no build metadata.
+  if (version.prerelease == nullptr || version.build_metadata == nullptr) {
+    return false;
+  }
+
+  const std::string_view prerelease{version.prerelease};
+  const std::string_view build_metadata{version.build_metadata};
+  const bool prerelease_is_well_formed =
+      prerelease.empty() || detail::IsVersionIdentifierList(prerelease);
+  const bool build_metadata_is_well_formed =
+      build_metadata.empty() || detail::IsVersionIdentifierList(build_metadata);
+  return prerelease_is_well_formed && build_metadata_is_well_formed;
 }
 
 }  // namespace eversion

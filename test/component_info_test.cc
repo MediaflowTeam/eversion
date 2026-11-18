@@ -35,6 +35,21 @@ constexpr eversion::ComponentInfo kComponentInfo{
     .version = kComponentVersion,
 };
 
+void ExpectMalformedInEachVersionField(const char* text) {
+  const eversion::ComponentVersion malformed_prerelease{
+      .prerelease = text,
+      .build_metadata = "build.42",
+  };
+  EXPECT_FALSE(eversion::IsWellFormedComponentVersion(malformed_prerelease));
+
+  const eversion::ComponentVersion malformed_build_metadata{
+      .prerelease = "rc.1",
+      .build_metadata = text,
+  };
+  EXPECT_FALSE(
+      eversion::IsWellFormedComponentVersion(malformed_build_metadata));
+}
+
 struct ExtendedComponentInfo {
   eversion::ComponentInfo prefix;
   const char* homepage = "";
@@ -136,6 +151,56 @@ TEST(ComponentInfo, ValidationRejectsInvalidMetadata) {
   EXPECT_FALSE(eversion::IsValidComponentInfo(&missing_build));
 }
 
+TEST(ComponentInfo, WellFormedComponentVersionAcceptsSemVerIdentifiers) {
+  constexpr eversion::ComponentVersion kEmptyStrings{
+      .prerelease = "",
+      .build_metadata = "",
+  };
+  EXPECT_TRUE(eversion::IsWellFormedComponentVersion(kEmptyStrings));
+
+  constexpr eversion::ComponentVersion kPrereleaseAndBuild{
+      .prerelease = "rc.1",
+      .build_metadata = "build.42",
+  };
+  EXPECT_TRUE(eversion::IsWellFormedComponentVersion(kPrereleaseAndBuild));
+
+  constexpr eversion::ComponentVersion kNumericAndHyphen{
+      .prerelease = "007",
+      .build_metadata = "a-b.c",
+  };
+  EXPECT_TRUE(eversion::IsWellFormedComponentVersion(kNumericAndHyphen));
+
+  constexpr eversion::ComponentVersion kZero{
+      .prerelease = "0",
+      .build_metadata = "0",
+  };
+  EXPECT_TRUE(eversion::IsWellFormedComponentVersion(kZero));
+}
+
+TEST(ComponentInfo, WellFormedComponentVersionRejectsMalformedIdentifiers) {
+  ExpectMalformedInEachVersionField("bad id!! ");
+  ExpectMalformedInEachVersionField("a..b");
+  ExpectMalformedInEachVersionField(".a");
+  ExpectMalformedInEachVersionField("a.");
+  ExpectMalformedInEachVersionField("rc.1 ");
+  ExpectMalformedInEachVersionField("+x");
+  ExpectMalformedInEachVersionField("rc_1");
+}
+
+TEST(ComponentInfo, WellFormedComponentVersionRejectsNullStrings) {
+  const eversion::ComponentVersion null_prerelease{
+      .prerelease = nullptr,
+      .build_metadata = "build.42",
+  };
+  EXPECT_FALSE(eversion::IsWellFormedComponentVersion(null_prerelease));
+
+  const eversion::ComponentVersion null_build_metadata{
+      .prerelease = "rc.1",
+      .build_metadata = nullptr,
+  };
+  EXPECT_FALSE(eversion::IsWellFormedComponentVersion(null_build_metadata));
+}
+
 TEST(ComponentInfo, FieldAvailabilityUsesStructSize) {
   eversion::ComponentInfo info = kComponentInfo;
   info.struct_size = eversion::kComponentInfoRequiredSize;
@@ -158,6 +223,14 @@ static_assert(!eversion::IsValidComponentInfo(nullptr));
 static_assert(eversion::IsComponentInfoFieldAvailable(
     &kComponentInfo, offsetof(eversion::ComponentInfo, version),
     sizeof(eversion::ComponentVersion)));
+
+constexpr eversion::ComponentVersion kMalformedComponentVersion{
+    .prerelease = "bad id!! ",
+    .build_metadata = "build.42",
+};
+static_assert(eversion::IsWellFormedComponentVersion(kComponentVersion));
+static_assert(
+    !eversion::IsWellFormedComponentVersion(kMalformedComponentVersion));
 
 static_assert(std::is_standard_layout_v<eversion::ComponentVersion>,
               "ComponentVersion must be standard layout for the fixed ABI v1 "
