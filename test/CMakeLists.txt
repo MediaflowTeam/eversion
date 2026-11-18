@@ -35,6 +35,7 @@ add_executable(${PROJECT_NAME}_test
   version_test.cc
   version_declare_test.cc
   component_info_test.cc
+  format_test.cc
 )
 
 target_link_libraries(${PROJECT_NAME}_test
