@@ -9,6 +9,7 @@
 #define EVERSION_RUNTIME_VERSION_H_
 
 #include <eversion/detail/runtime_version_parsing.h>
+#include <eversion/detail/version_hash.h>
 #include <eversion/version.h>
 
 #include <compare>
@@ -26,7 +27,9 @@ namespace eversion {
  * `RuntimeVersion` owns its strings and does not hand out `Version` views, so
  * a stored value cannot dangle. Compare it directly with another
  * `RuntimeVersion` or with a `Version`; use `ToRuntimeVersion()` to copy a
- * `Version` into one.
+ * `Version` into one. `std::hash` is based on precedence: it ignores build
+ * metadata and agrees with `operator==`. `std::format` and `operator<<` are
+ * available from `<eversion/format.h>`.
  */
 struct RuntimeVersion {
   /** @brief Major version component. */
@@ -54,7 +57,9 @@ struct RuntimeVersion {
   }
 
   /** @brief Formats this version as a canonical string. */
-  [[nodiscard]] std::string ToString() const { return View().ToString(); }
+  [[nodiscard]] constexpr std::string ToString() const {
+    return View().ToString();
+  }
 
   /**
    * @brief Compares this runtime version with @p other by release precedence.
@@ -106,10 +111,40 @@ struct RuntimeVersion {
     return View() == other;
   }
 
+  /**
+   * @brief Returns whether this runtime version and @p other are identical
+   * field by field.
+   *
+   * Unlike `operator==`, which compares precedence and ignores build metadata,
+   * this compares every field. The prerelease and build metadata strings are
+   * compared byte for byte, so `rc.007` is not identical to `rc.7`, and `+a` is
+   * not identical to `+b`. Two versions are identical exactly when
+   * `ToString()` produces the same text.
+   *
+   * @param other Runtime version to compare with.
+   */
+  [[nodiscard]] bool IsIdenticalTo(const RuntimeVersion& other) const noexcept {
+    return View().IsIdenticalTo(other.View());
+  }
+
+  /**
+   * @brief Returns whether this runtime version and @p other are identical
+   * field by field.
+   *
+   * The reversed form, with the `Version` on the left, is not provided because
+   * this operation is exposed as a member function. Build metadata and
+   * prerelease strings are compared byte for byte.
+   *
+   * @param other Version to compare with.
+   */
+  [[nodiscard]] bool IsIdenticalTo(const Version& other) const noexcept {
+    return View().IsIdenticalTo(other);
+  }
+
  private:
   // Builds a view of this object for the comparisons and formatting above.
   // The view must not outlive the full expression that uses it.
-  [[nodiscard]] Version View() const noexcept {
+  [[nodiscard]] constexpr Version View() const noexcept {
     return Version{
         .major = major,
         .minor = minor,
@@ -206,5 +241,24 @@ struct RuntimeVersion {
 }
 
 }  // namespace eversion
+
+/** @cond STD_SPECIALIZATIONS */
+template <>
+struct std::hash<eversion::RuntimeVersion> {
+  /**
+   * @brief Returns a hash consistent with
+   * `eversion::RuntimeVersion::operator==`.
+   *
+   * Build metadata is ignored, so versions that differ only by build metadata
+   * hash equally. Content that is equal to a `eversion::Version` also hashes
+   * to the same value as that version.
+   */
+  std::size_t operator()(
+      const eversion::RuntimeVersion& version) const noexcept {
+    return eversion::detail::HashVersionPrecedence(
+        version.major, version.minor, version.patch, version.prerelease);
+  }
+};
+/** @endcond */
 
 #endif  // EVERSION_RUNTIME_VERSION_H_

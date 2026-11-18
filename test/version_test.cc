@@ -5,15 +5,21 @@
  * @date 2026-06-05
  */
 
+#include <eversion/detail/semver_precedence.h>
 #include <eversion/runtime_version.h>
 #include <gtest/gtest.h>
 
 #include <compare>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -21,7 +27,7 @@ namespace {
 constexpr eversion::Version V(std::uint32_t major, std::uint32_t minor,
                               std::uint32_t patch,
                               std::string_view prerelease = {},
-                              std::string_view build_metadata = {}) {
+                              std::string_view build_metadata = {}) noexcept {
   return eversion::Version{.major = major,
                            .minor = minor,
                            .patch = patch,
@@ -31,7 +37,7 @@ constexpr eversion::Version V(std::uint32_t major, std::uint32_t minor,
 
 eversion::RuntimeVersion R(std::uint32_t major, std::uint32_t minor,
                            std::uint32_t patch, std::string prerelease = {},
-                           std::string build_metadata = {}) {
+                           std::string build_metadata = {}) noexcept {
   return eversion::RuntimeVersion{.major = major,
                                   .minor = minor,
                                   .patch = patch,
@@ -308,6 +314,99 @@ TEST(Version, PrereleaseNumericBoundaries) {
   EXPECT_LT(V(1, 0, 0, "1"), V(1, 0, 0));
 }
 
+TEST(Version, EqualPrecedenceProducesEqualHashes) {
+  const eversion::Version build_metadata_a = V(1, 2, 3, {}, "git.aaa");
+  const eversion::Version build_metadata_b = V(1, 2, 3, {}, "git.bbb");
+  EXPECT_EQ(build_metadata_a, build_metadata_b);
+  EXPECT_EQ(std::hash<eversion::Version>{}(build_metadata_a),
+            std::hash<eversion::Version>{}(build_metadata_b));
+
+  const eversion::Version rc_zeros = V(1, 0, 0, "rc.007");
+  const eversion::Version rc_seven = V(1, 0, 0, "rc.7");
+  EXPECT_EQ(rc_zeros, rc_seven);
+  EXPECT_EQ(std::hash<eversion::Version>{}(rc_zeros),
+            std::hash<eversion::Version>{}(rc_seven));
+
+  const eversion::Version alpha_zeros = V(1, 0, 0, "alpha.01");
+  const eversion::Version alpha_one = V(1, 0, 0, "alpha.1");
+  EXPECT_EQ(alpha_zeros, alpha_one);
+  EXPECT_EQ(std::hash<eversion::Version>{}(alpha_zeros),
+            std::hash<eversion::Version>{}(alpha_one));
+}
+
+TEST(Version, RuntimeVersionHashMatchesVersionHash) {
+  const eversion::RuntimeVersion runtime = R(1, 0, 0, "rc.007", "x");
+  const eversion::Version view = V(1, 0, 0, "rc.7");
+  const std::size_t runtime_hash =
+      std::hash<eversion::RuntimeVersion>{}(runtime);
+  const std::size_t view_hash = std::hash<eversion::Version>{}(view);
+  EXPECT_EQ(runtime_hash, view_hash);
+}
+
+TEST(Version, UnorderedContainersUsePrecedenceEquality) {
+  std::unordered_set<eversion::Version> versions;
+  versions.insert(V(1, 2, 3, {}, "git.aaa"));
+  EXPECT_NE(versions.find(V(1, 2, 3, {}, "git.bbb")), versions.end());
+  versions.insert(V(1, 2, 3, {}, "git.bbb"));
+  EXPECT_EQ(versions.size(), 1U);
+
+  std::unordered_map<eversion::RuntimeVersion, int> runtime_versions;
+  runtime_versions.emplace(R(1, 2, 3, {}, "git.aaa"), 1);
+  EXPECT_NE(runtime_versions.find(R(1, 2, 3, {}, "git.bbb")),
+            runtime_versions.end());
+  runtime_versions.emplace(R(1, 2, 3, {}, "git.bbb"), 2);
+  EXPECT_EQ(runtime_versions.size(), 1U);
+}
+
+TEST(Version, DistinctPrecedencesHashDifferently) {
+  const std::hash<eversion::Version> hasher;
+  std::set<std::size_t> hashes;
+  hashes.insert(hasher(V(1, 2, 3)));
+  hashes.insert(hasher(V(1, 2, 4)));
+  hashes.insert(hasher(V(1, 3, 3)));
+  hashes.insert(hasher(V(2, 2, 3)));
+  hashes.insert(hasher(V(1, 2, 3, "rc.1")));
+  hashes.insert(hasher(V(1, 2, 3, "rc.2")));
+  EXPECT_EQ(hashes.size(), 6U);
+}
+
+TEST(Version, IsIdenticalToComparesEveryField) {
+  const eversion::Version build_metadata_a = V(1, 2, 3, {}, "git.aaa");
+  const eversion::Version build_metadata_b = V(1, 2, 3, {}, "git.bbb");
+  EXPECT_FALSE(build_metadata_a.IsIdenticalTo(build_metadata_b));
+
+  const eversion::Version rc_zeros = V(1, 0, 0, "rc.007");
+  const eversion::Version rc_seven = V(1, 0, 0, "rc.7");
+  EXPECT_FALSE(rc_zeros.IsIdenticalTo(rc_seven));
+
+  const eversion::Version alpha_zeros = V(1, 0, 0, "alpha.01");
+  const eversion::Version alpha_one = V(1, 0, 0, "alpha.1");
+  EXPECT_FALSE(alpha_zeros.IsIdenticalTo(alpha_one));
+
+  const eversion::Version first = V(1, 2, 3, "rc.1", "git.aaa");
+  const eversion::Version second = V(1, 2, 3, "rc.1", "git.aaa");
+  EXPECT_TRUE(first.IsIdenticalTo(second));
+  EXPECT_EQ(first.ToString(), second.ToString());
+}
+
+TEST(Version, RuntimeVersionIsIdenticalToComparesEveryField) {
+  const eversion::RuntimeVersion first = R(1, 2, 3, "rc.1", "git.aaa");
+  const eversion::RuntimeVersion second = R(1, 2, 3, "rc.1", "git.aaa");
+  const eversion::RuntimeVersion other_build = R(1, 2, 3, "rc.1", "git.bbb");
+  EXPECT_TRUE(first.IsIdenticalTo(second));
+  EXPECT_FALSE(first.IsIdenticalTo(other_build));
+
+  const eversion::RuntimeVersion rc_zeros = R(1, 0, 0, "rc.007");
+  const eversion::RuntimeVersion rc_seven = R(1, 0, 0, "rc.7");
+  EXPECT_TRUE(rc_zeros.IsIdenticalTo(V(1, 0, 0, "rc.007")));
+  EXPECT_FALSE(rc_zeros.IsIdenticalTo(V(1, 0, 0, "rc.7")));
+  EXPECT_FALSE(rc_zeros.IsIdenticalTo(rc_seven));
+
+  const eversion::Version full = V(1, 2, 3, "rc.1", "git.aaa");
+  EXPECT_TRUE(first.IsIdenticalTo(full));
+  EXPECT_FALSE(other_build.IsIdenticalTo(full));
+}
+
 static_assert(V(1, 2, 3) == V(1, 2, 3));
 static_assert(V(1, 0, 0, "alpha") < V(1, 0, 0));
 static_assert(V(1, 2, 3, {}, "x") == V(1, 2, 3, {}, "y"));
@@ -320,5 +419,25 @@ static_assert(V(1, 2, 3) < V(1, 2, 4));
 static_assert(V(1, 9, 9) < V(2, 0, 0));
 static_assert(V(1, 1, 9) < V(1, 2, 0));
 static_assert(V(1, 2, 3, "alpha") < V(1, 2, 3));
+static_assert(!V(1, 0, 0, "rc.007").IsIdenticalTo(V(1, 0, 0, "rc.7")));
+static_assert(
+    V(1, 2, 3, "rc.1", "git.aaa").IsIdenticalTo(V(1, 2, 3, "rc.1", "git.aaa")));
+static_assert(noexcept(std::hash<eversion::Version>{}(V(1, 0, 0))));
+static_assert(noexcept(std::hash<eversion::RuntimeVersion>{}(R(1, 0, 0))));
+static_assert(V(1, 2, 3).ToString() == "1.2.3");
+static_assert(V(0, 0, 4294967295U).ToString() == "0.0.4294967295");
+static_assert(
+    V(1, 2, 3, "rc.1-a-long-prerelease", "git.deadbeefcafe").ToString() ==
+    "1.2.3-rc.1-a-long-prerelease+git.deadbeefcafe");
+static_assert(eversion::RuntimeVersion{
+                  .major = 1,
+                  .minor = 2,
+                  .patch = 3,
+                  .prerelease = "rc.1-a-long-prerelease",
+                  .build_metadata = "git.deadbeefcafe",
+              }
+                  .ToString() ==
+              "1.2.3-rc.1-a-long-prerelease+git.deadbeefcafe");
+static_assert(noexcept(eversion::detail::CompareIdentifier("alpha", "beta")));
 
 }  // namespace

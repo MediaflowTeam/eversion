@@ -110,8 +110,8 @@ constexpr std::strong_ordering CompareNumericIdentifiers(
  * @param  right  Right identifier (no surrounding dots).
  * @return        Strong ordering between @p left and @p right.
  */
-constexpr std::strong_ordering CompareIdentifier(std::string_view left,
-                                                 std::string_view right) {
+constexpr std::strong_ordering CompareIdentifier(
+    std::string_view left, std::string_view right) noexcept {
   const bool left_is_numeric = IsNumericIdentifier(left);
   const bool right_is_numeric = IsNumericIdentifier(right);
 
